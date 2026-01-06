@@ -17,7 +17,9 @@ name: "Update Copyright year at the start of every year"
 
 on: 
   workflow_dispatch:
-
+  push:
+    branches:
+      - copyright-test
 
 jobs:
   copyright-update:
