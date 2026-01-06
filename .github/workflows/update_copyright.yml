@@ -17,6 +17,8 @@ name: "Update Copyright year at the start of every year"
 
 on: 
   workflow_dispatch:
+  schedule:
+    - cron: '40 11 6 1 *'  # At 00:00 on January 1st every year
   push:
     branches:
       - copyright-test
@@ -26,7 +28,7 @@ jobs:
     name: Update Copright
     runs-on: ubuntu-latest
     env:
-      branch_name: bau/copyright-update
+      branch_name: copyright-update
     permissions:
       contents: write
       pull-requests: write
@@ -52,3 +54,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: | 
           gh pr create -B master -H $branch_name --title "Update Copyright year" --body 'Created by Github action'
+      
