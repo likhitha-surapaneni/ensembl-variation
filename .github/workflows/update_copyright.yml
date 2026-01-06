@@ -19,9 +19,6 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '40 11 6 1 *'  # At 00:00 on January 1st every year
-  push:
-    branches:
-      - copyright-test
 
 jobs:
   copyright-update:
