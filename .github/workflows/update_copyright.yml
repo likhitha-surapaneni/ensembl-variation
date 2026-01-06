@@ -33,7 +33,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          repository: main
       - name: Update Copyright files
         run: |
           last_year=$(date +%Y --date='1 year ago')
