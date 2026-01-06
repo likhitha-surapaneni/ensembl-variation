@@ -51,4 +51,4 @@ jobs:
         env: 
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: | 
-          gh pr create -B main -H $branch_name --title "Update Copyright year" --body 'Created by Github action'
+          gh pr create -B master -H $branch_name --title "Update Copyright year" --body 'Created by Github action'
