@@ -1,5 +1,5 @@
 # Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-# Copyright [2016-2021] EMBL-European Bioinformatics Institute
+# Copyright [2016-2026] EMBL-European Bioinformatics Institute
 # 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -361,8 +361,6 @@ $dts = $c->get_all_ProteinDiplotypes;
 is(scalar @$dts, 81, "Protein diplotypes - count");
 
 $dt = (sort {$b->count <=> $a->count} @$dts)[0];
-
-$DB::single = 1;
 
 is($dt->name, 'ENSP00000422007:621del{325}_566R>Q,620*>R,671C>R,819Q>R', "Protein diplotype name");
 is($dt->count, 676, "Protein diplotype count");

@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2020] EMBL-European Bioinformatics Institute
+Copyright [2016-2026] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -98,7 +98,7 @@ sub fetch_input {
 sub run {
   my $self = shift;
   my $input_file = $self->required_param('RNAi_file');
-  source_version => $self->param('source_version');
+  my $source_version = $self->required_param('source_version');
   # get phenotype data
   my $results = $self->parse_input_file($input_file);
   $self->print_logFH("Got ".(scalar @{$results->{'phenotypes'}})." phenotypes \n") if ($self->debug);
@@ -113,6 +113,8 @@ sub run {
                                species => $self->required_param('species'),
                                run_type => $self->required_param('run_type')
                              });
+
+  $self->clean_dir;
 }
 
 sub write_output {
@@ -157,7 +159,7 @@ sub parse_input_file {
 
     my $gene_id     	  = $data[0];
     my $phenotype   	  = $data[2];
-    my $phenotype_id      = $data[11];
+    my $phenotype_id      = $data[4];
     my $study	          = $data[8];
     my $study_description = $data[9];
     my @accessions        = ($data[3]);

@@ -1,6 +1,6 @@
 =head1 LICENSE
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2021] EMBL-European Bioinformatics Institute
+Copyright [2016-2026] EMBL-European Bioinformatics Institute
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -89,6 +89,7 @@ sub run {
       foreach my $vf(@{$vfs}){
         my $hgvsg = $vf->hgvs_genomic($slice);
         for my $allele (sort keys %$hgvsg) {
+            next if $hgvsg->{$allele} =~ /]$/;
             print $fh join("\t", $vf->get_Variation_dbID(), $vf->name(),
                              $vf->seq_region_name, $vf->seq_region_start(), $vf->seq_region_end(),
                              $hgvsg->{$allele}), "\n";

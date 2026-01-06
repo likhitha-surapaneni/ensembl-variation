@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2021] EMBL-European Bioinformatics Institute
+Copyright [2016-2026] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -213,11 +213,13 @@ sub new {
       -source => $source || undef,
       -strict_name_match => $hash->{strict_name_match},
       -use_seq_region_synonyms => $hash->{use_seq_region_synonyms},
+      -track_name => $hash->{track_name},
       -created =>$hash->{created} || undef,
       -updated =>$hash->{updated} || undef,
       -is_remapped => $hash->{is_remapped} ||0,
       -adaptor => $self,
       -tmpdir => $hash->{tmpdir} || $tmpdir,
+      -use_vcf_consequences => $hash->{use_vcf_consequences} || undef,
       -ref_freq_index => $hash->{ref_freq_index},
     ));
   }

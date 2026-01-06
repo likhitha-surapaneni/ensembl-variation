@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2021] EMBL-European Bioinformatics Institute
+Copyright [2016-2026] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -48,8 +48,7 @@ my $DEBUG   = 0;
 sub run {
   my $self = shift;
 
-  my $disambiguate_sn_alleles = 
-    $self->param('disambiguate_single_nucleotide_alleles');
+  my $disambiguate_sn_alleles = $self->param('disambiguate_single_nucleotide_alleles');
   my $mtmp = $self->param('mtmp_table');
   my $max_distance = $self->param('max_distance');
   my $by_transcript = ($self->param('analysis') eq 'by_transcript') ? 1 : 0;
@@ -72,7 +71,9 @@ sub run {
 
   my $var_dba = $self->get_species_adaptor('variation');
   $var_dba->dbc->reconnect_when_lost(1);
-  
+
+  my $dbc = $var_dba->dbc();
+
   my $sa = $core_dba->get_SliceAdaptor;
   
   my $tva = $var_dba->get_TranscriptVariationAdaptor;
@@ -98,12 +99,14 @@ sub run {
   my $slice;
   my $stable_id;
   my @transcripts = ();
+
   if ($by_transcript) {
     my $transcript_stable_id = $self->param('transcript_stable_id');
     $stable_id = $transcript_stable_id;
     my $ta = $core_dba->get_TranscriptAdaptor;
     my $transcript = $ta->fetch_by_stable_id($transcript_stable_id) 
       or die "failed to fetch transcript for stable id: $transcript_stable_id";
+
     $slice = $sa->fetch_by_transcript_stable_id(
       $transcript_stable_id, 
       $max_distance
@@ -112,7 +115,9 @@ sub run {
     $slice->seq();
     $transcript = $transcript->transfer($slice);
     push @transcripts, $transcript;
-  } else {
+  } 
+  
+  else {
     my $gene_stable_id =  $self->param('gene_stable_id');
     $stable_id = $gene_stable_id;
     my $ga = $core_dba->get_GeneAdaptor;
@@ -139,7 +144,6 @@ sub run {
   my $hgvs_fh = FileHandle->new();
   $hgvs_fh->open(">" . $web_index_files_dir . "/$stable_id\_variation_hgvs.txt") or die "Cannot open dump file " . $web_index_files_dir . "/$stable_id\_variation_hgvs.txt: $!";
 
-#  my @write_data;
   my $hgvs_by_var = {};
   my $var_count = 0;
 
@@ -152,8 +156,16 @@ sub run {
   );
 
   for my $transcript (@transcripts) {
-    
+
     my $biotype = $transcript->biotype;
+    my $is_mane = $transcript->is_mane(); # grch38
+    my $is_canonical = $transcript->is_canonical(); # grch37
+    my $stable_id = $transcript->stable_id;
+    my @vf_ids;
+
+    #Skip transcript if running in gc primary mode and transcript isn't part of that set.
+    next if ($self->param('gencode_primary') and !$transcript->gencode_primary);
+
 
     for my $vf(@vfs) {
 
@@ -175,7 +187,9 @@ sub run {
       # if the variation has no effect on the transcript $tv will be undef
       if ($tv) {#} && ( scalar(@{ $tv->consequence_type }) > 0) ) {
 
-	next if (!scalar(@{ $tv->consequence_type }) && ($tv->distance_to_transcript > $max_distance));
+	      next if (!scalar(@{ $tv->consequence_type }) && ($tv->distance_to_transcript > $max_distance));
+
+        push @vf_ids, $vf->dbID();
 
         # store now or save to store later? Uncomment out the behaviour you want
         # save to store later uses more memory but means you don't have to sort human TV after the run
@@ -197,12 +211,26 @@ sub run {
         print $tv_fh join("\t", map {defined($_) ? $_ : '\N'} @$_)."\n" for @$data;
 
         if($mtmp) {
+
           my $mtmp_data = $tva->_get_mtmp_write_data_from_tv_write_data($data);
           my $mtmp_fh = $files->{MTMP_transcript_variation}->{fh};
-          unless($biotypes_to_skip{$biotype}){ 
-	    print $mtmp_fh join("\t", map {defined($_) ? $_ : '\N'} @$_)."\n" for @$mtmp_data;
+          
+          # Check species
+          my $species = $self->param('species');
+          # MANE is only available for human grch38
+          my $is_human = $species =~ /homo_sapiens|human/ ? 1 : 0;
+          my $write_mtmp = ($is_human && $is_mane) || !$is_human ? 1 : 0;
+
+          # Human grch37 has canonical transcripts
+          if($is_human && lc $self->param('assembly') =~ /37|grch37/ && $is_canonical) {
+            $write_mtmp = 1;
           }
-	}
+
+          unless($biotypes_to_skip{$biotype} || !$write_mtmp){
+            print $mtmp_fh join("\t", map {defined($_) ? $_ : '\N'} @$_)."\n" for @$mtmp_data;
+          }
+        }
+
         ## end block
 
       
@@ -228,6 +256,29 @@ sub run {
           $hgvs_by_var = {};
         }
       }                       
+    }
+
+    # Delete Updated
+     if (-e $self->param('update_diff')){
+        my @chunk_delete;
+
+        push @chunk_delete, [ splice @vf_ids, 0, 500 ]  while @vf_ids;
+
+        for (@chunk_delete){
+          my $joined_vf_ids = join(',', @$_);
+          next if $joined_vf_ids == "";
+          $dbc->do(qq{
+                    DELETE FROM  transcript_variation
+                    WHERE   variation_feature_id IN ($joined_vf_ids)
+                    AND     feature_stable_id = "$stable_id"
+          });
+
+          $dbc->do(qq{
+                    DELETE FROM  MTMP_transcript_variation
+                    WHERE   variation_feature_id IN ($joined_vf_ids)
+                    AND     feature_stable_id = "$stable_id"
+          }) if($mtmp);
+        }
     }
   }
 
@@ -270,6 +321,7 @@ sub run {
 
 sub write_output {
   my $self = shift;
+  return;
 }
 
 sub dump_hgvs_var {

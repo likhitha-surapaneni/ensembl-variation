@@ -1,5 +1,5 @@
 # Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-# Copyright [2016-2021] EMBL-European Bioinformatics Institute
+# Copyright [2016-2026] EMBL-European Bioinformatics Institute
 # 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -543,7 +543,7 @@ $transcript_tests->{$tf->stable_id}->{tests} = [
         alleles => '-',
         start   => $exon_start-10,
         end     => $exon_end+10,
-        effects => [qw(intron_variant splice_donor_5th_base_variant splice_polypyrimidine_tract_variant splice_acceptor_variant splice_donor_variant coding_sequence_variant )],
+        effects => [qw(intron_variant splice_donor_5th_base_variant splice_acceptor_variant splice_donor_variant coding_sequence_variant )],
     }, {
         comment => 'long sequence var where middle is identical but overlaps splice site',
         alleles => 'ATGTACTGCCTATGTGTGCTGTGAGTATGATACGGTGGACT',
@@ -603,7 +603,7 @@ $transcript_tests->{$tf->stable_id}->{tests} = [
         alleles => 'GCA',
         start   => $cds_start+2,
         end     => $cds_start+1,
-        effects => [qw(inframe_insertion)],
+        effects => [qw(inframe_insertion start_retained_variant)],
     }, {
         alleles => '-',
         start   => $cds_start+3,
@@ -632,7 +632,7 @@ $transcript_tests->{$tf->stable_id}->{tests} = [
         alleles => 'CAT',
         start   => $cds_start-1,
         end     => $cds_start+2,
-        effects => [qw(5_prime_UTR_variant start_lost)],
+        effects => [qw(5_prime_UTR_variant start_retained_variant)],
         pep_alleles => '',
     }, {
         alleles => 'G',
@@ -756,7 +756,7 @@ $transcript_tests->{$tf->stable_id}->{tests} = [
         alleles => '-',
         start   => $intron_end-2,
         end     => $intron_end+3,
-        effects => [qw( splice_acceptor_variant coding_sequence_variant splice_polypyrimidine_tract_variant intron_variant)],
+        effects => [qw( splice_acceptor_variant coding_sequence_variant intron_variant)],
     }, {
         comment => 'deletion overlapping UTR and start site, start lost 1',
         alleles => '-',
@@ -1242,7 +1242,7 @@ $transcript_tests->{$tr->stable_id}->{tests} = [
         alleles => '-',
         start   => $intron_start - 3,
         end     => $intron_start + 2,
-        effects => [qw( splice_acceptor_variant splice_polypyrimidine_tract_variant coding_sequence_variant intron_variant)],
+        effects => [qw( splice_acceptor_variant coding_sequence_variant intron_variant)],
     }, {
         alleles => '-',
         start   => $cds_end - 2,
@@ -1442,7 +1442,7 @@ $transcript_tests->{$sc_se_t->stable_id}->{tests} = [
     }, 
 ];
 
-# a transcript with a misc amino acid edit
+# a transcript with a misc amino acid edit altered to start
 my $aa_se_t = $ta->fetch_by_stable_id('ENST00000295641');
 
 $transcript_tests->{$aa_se_t->stable_id}->{transcript} = $aa_se_t;
@@ -1453,7 +1453,7 @@ $transcript_tests->{$aa_se_t->stable_id}->{tests} = [
         alleles => 'T',
         start   => 220462640,
         end     => 220462640,
-        effects => [qw(synonymous_variant)],
+        effects => [qw(start_retained_variant)],
     }, 
 ];
 
@@ -1489,7 +1489,7 @@ my $tv = Bio::EnsEMBL::Variation::TranscriptVariation->new(
 my $tva = $tv->get_all_alternate_BaseVariationFeatureOverlapAlleles();
 
 my $start_retained = Bio::EnsEMBL::Variation::Utils::VariationEffect::start_retained_variant($tva->[0]);
-is($start_retained, undef, 'start_retained works with no $bvfo & $bvf');
+is($start_retained, 0, 'start_retained works with no $bvfo & $bvf');
 
 my $stop_retained = Bio::EnsEMBL::Variation::Utils::VariationEffect::stop_retained($tva->[0]);
 is($stop_retained, undef, 'stop_retained works with no $bvfo & $bvf');

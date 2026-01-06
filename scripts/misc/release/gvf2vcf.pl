@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 # Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-# Copyright [2016-2021] EMBL-European Bioinformatics Institute
+# Copyright [2016-2026] EMBL-European Bioinformatics Institute
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -710,7 +710,7 @@ sub print_header {
       $url = 'https://'.$division.'.ensembl.org/'.$species_name;
     }
     my $vcf_source_field = "ensembl;version=$schema_version;url=$url";
-    my $reference_info = "ftp://ftp.ensembl.org/pub/release-$schema_version/fasta/$species_name/dna/";
+    my $reference_info = "https://ftp.ensembl.org/pub/release-$schema_version/fasta/$species_name/dna/";
 
     # Meta-information
     print $fh join("\n", '##fileformat=VCFv4.1', "##fileDate=$vcf_file_date", "##source=$vcf_source_field", "##reference=$reference_info"), "\n";

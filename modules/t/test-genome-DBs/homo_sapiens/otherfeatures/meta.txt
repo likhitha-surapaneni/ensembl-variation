@@ -1,5 +1,5 @@
 1	\N	schema_type	core
-2	\N	schema_version	106
+2	\N	schema_version	115
 3	\N	patch	patch_73_74_a.sql|schema_version
 4	\N	patch	patch_73_74_b.sql|remove_dnac
 5	\N	patch	patch_73_74_c.sql|remove_unconventional_transcript_association
@@ -169,3 +169,19 @@
 879	\N	patch	patch_103_104_a.sql|schema_version
 880	\N	patch	patch_104_105_a.sql|schema_version
 881	\N	patch	patch_105_106_a.sql|schema_version
+882	\N	patch	patch_106_107_a.sql|schema_version
+883	\N	patch	patch_106_107_b.sql|Added index for seq_region_mapping
+884	\N	patch	patch_107_108_a.sql|schema_version
+885	\N	patch	patch_108_109_a.sql|schema_version
+886	\N	patch	patch_108_109_b.sql|Added xref source GeneCards into external_db
+887	\N	patch	patch_109_110_a.sql|schema_version
+888	\N	patch	patch_109_110_b.sql|Add IS_PAR relationship to link X- and Y-PAR genes
+889	\N	patch	patch_109_110_c.sql|Allow gene id to belong to multiple alt allele groups
+890	\N	patch	patch_110_111_a.sql|schema_version
+891	\N	patch	patch_111_112_a.sql|schema_version
+892	\N	patch	patch_111_112_b.sql|Allow meta_value to be null
+893	\N	patch	patch_111_112_c.sql|Extend meta_key length to 64
+894	\N	patch	patch_112_113_a.sql|schema_version
+895	\N	patch	patch_112_113_b.sql|Ensure meta_value is not null
+896	\N	patch	patch_113_114_a.sql|schema_version
+897     \N	patch   patch_114_115_a.sql|schema_version

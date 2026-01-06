@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 # Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-# Copyright [2016-2021] EMBL-European Bioinformatics Institute
+# Copyright [2016-2026] EMBL-European Bioinformatics Institute
 # 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,15 +28,18 @@
 
 
 use strict;
+use warnings;
 use Bio::EnsEMBL::Registry;
 use Bio::EnsEMBL::Utils::Exception qw(verbose throw warning);
 use Bio::EnsEMBL::Utils::Argument qw( rearrange );
 use Bio::EnsEMBL::Variation::Utils::SpecialChar qw(replace_char decode_text);
+use Bio::EnsEMBL::Variation::Utils::Reports qw(report_counts);
 
 use FindBin qw( $Bin );
 use Getopt::Long;
 use ImportUtils qw(dumpSQL debug create_and_load load);
 use LWP::Simple;
+use URI::Escape qw(uri_unescape);
 
 our ($species, $input_file, $input_dir, $source_name, $TMP_DIR, $TMP_FILE, $var_set_id, $mapping, $num_gaps,
      $target_assembly, $cs_version_number, $size_diff, $version, $registry_file, $medgen_file, $hpo_file, $replace_study, $debug);
@@ -154,6 +157,11 @@ my $dbVar = $vdb->dbc->db_handle;
 my $csa = Bio::EnsEMBL::Registry->get_adaptor($species, "core", "coordsystem");
 our $default_cs = $csa->fetch_by_name("chromosome");
 
+my $int_dba = Bio::EnsEMBL::Registry->get_DBAdaptor('multi', 'intvar');
+
+# count number of rows before import
+my @count_tables = qw(structural_variation structural_variation_feature structural_variation_sample structural_variation_association);
+report_counts($vdb, "before", \@count_tables);
 
 # set the target assembly
 $target_assembly ||= $default_cs->version;
@@ -174,6 +182,7 @@ my $phenotype_data;
 
 my $source_id = source();
 
+my @study_names;
 
 
 ##########
@@ -184,12 +193,8 @@ pre_processing();
 
 foreach my $in_file (@files) {
   next if ($in_file !~ /\.gvf$/);
-  
+
   $in_file =~ /^(\w{4}\d+)_/;
-  if ($study_to_skip{$1}) {
-    debug("Study $1 (".$in_file.") skipped because it contains non ".$species." data");
-    next;
-  }
 
   my $msg ="File: $in_file ($f_count/$f_nb)";
   print "$msg\n";
@@ -202,6 +207,20 @@ foreach my $in_file (@files) {
   else {
     $fname = $in_file;
   }
+
+  # save the study name for later to insert into internal db
+  my $aux_name = $fname;
+  $aux_name =~ s/.*\///;
+  
+  my @split_name = split(/\./, $aux_name, 2);
+  my $file_study_name = $split_name[0];
+
+  if ($study_to_skip{$file_study_name}) {
+    debug("Study $file_study_name (".$in_file.") skipped because it contains non ".$species." data");
+    next;
+  }
+
+  push (@study_names, $file_study_name);
 
   # Variation set - 1000 Genomes phase 3 and gnomAD
   if ($species =~ /homo|human/i && $fname =~ /estd214/) {
@@ -220,7 +239,7 @@ foreach my $in_file (@files) {
   $no_mapping_needed = 0;
   $skipped = 0;
   $failed = [];
-  $study_id;
+  $study_id = undef;
   $somatic_study = 0;
 
 
@@ -255,15 +274,19 @@ foreach my $in_file (@files) {
 # Post processing for mouse annotation (delete duplicated entries in structural_variation_sample)
 post_processing_annotation() if ($species =~ /mouse|mus/i);
 post_processing_feature();
-post_processing_sample();
+post_processing_sample() if ($source_name eq 'DGVa');
 post_processing_phenotype();
 post_processing_clinical_significance();
 post_processing_failed_variants();
 
 # Finishing methods
 meta_coord();
+update_internal_db();
 verifications(); # URLs
 cleanup() if (!defined($debug));
+
+# count number of rows after import
+report_counts($vdb, "after", \@count_tables);
 
 debug(localtime()." All done!");
 
@@ -399,19 +422,17 @@ sub study_table{
   $study =~ /(\w+\d+)\.?\d*/;
   my $study_ftp = $1;
   if ($source_name eq 'DGVa'){
-    $study_ftp = "ftp://ftp.ebi.ac.uk/pub/databases/dgva/$study_ftp\_$author";
+    $study_ftp = "https://ftp.ebi.ac.uk/pub/databases/dgva/$study_ftp\_$author";
   }
   else {
     $study_ftp = "https://www.ncbi.nlm.nih.gov/dbvar/studies/$study_ftp";
   }
 
-  my $assembly_desc = " [remapped from build $assembly]" if ($mapping and $assembly ne $target_assembly);
+  my $assembly_desc = $mapping and ($assembly ne $target_assembly) ? " [remapped from build $assembly]" : "";
 
   $stmt = qq{ SELECT st.study_id, st.description, st.external_reference FROM study st, source s
               WHERE s.source_id=st.source_id AND s.name='$source_name' and st.name='$study'};
-  my $rows = $dbVar->selectall_arrayref($stmt);    
-
-  my $assembly_desc;
+  my $rows = $dbVar->selectall_arrayref($stmt);
 
   # UPDATE
   if (scalar (@$rows)) {
@@ -842,7 +863,7 @@ sub structural_variation_sample {
     my $rows_strains = $dbVar->selectall_arrayref($stmt);
     foreach my $row (@$rows_strains) {
       my $strain = $row->[0];
-      next if ($strain eq  '');
+      next if (!$strain);
 
       my $gender = 'Unknown';
       if($row->[1] =~ /\w+/ && $row->[1] ne 'NULL') {
@@ -865,7 +886,7 @@ sub structural_variation_sample {
     foreach my $row (@$rows_samples) {
       my $sample  = $row->[0];
       my $subject = $row->[1];
-      next if ($sample eq  '' || $subject eq '');
+      next if (!$sample || !$subject);
 
       $dbVar->do(qq{ INSERT IGNORE INTO sample (name,description,study_id,display,individual_id) SELECT '$sample','Sample from the DGVa study $study_name', $study_id,"MARTDISPLAYABLE",min(individual_id) FROM individual WHERE name='$subject' LIMIT 1});
     }
@@ -876,7 +897,7 @@ sub structural_variation_sample {
     my $rows_subjects = $dbVar->selectall_arrayref($stmt);
     foreach my $row (@$rows_subjects) {
       my $subject = $row->[0];
-      next if ($subject eq  '');
+      next if (!$subject);
 
       my $gender = 'Unknown';
       if($row->[1] =~ /\w+/ && $row->[1] ne 'NULL') {
@@ -895,7 +916,8 @@ sub structural_variation_sample {
     foreach my $row (@$rows_samples) {
       my $sample  = $row->[0];
       my $subject = $row->[1];
-      next if ($sample eq  '' || $subject eq '');
+
+      next if (!$sample || !$subject);
 
       #$dbVar->do(qq{ INSERT IGNORE INTO sample (name,description,study_id,individual_id) SELECT '$sample','Sample from the DGVa study $study_name', $study_id, min(individual_id) FROM individual WHERE name='$subject'});
       $dbVar->do(qq{ INSERT IGNORE INTO sample (name,description,individual_id) SELECT '$sample','Sample from the DGVa study $study_name', min(individual_id) FROM individual WHERE name='$subject'});
@@ -968,7 +990,7 @@ sub get_attrib_id {
   $stmt->execute() || die;
   my $attrib_id = ($stmt->fetchrow_array)[0];
 
-  die(localtime()." ERROR: No attribute 'trait' was found in attrib table!\nCleanup the tmp tables 'tmp_sv' and 'tmp_sv_phenotype' before importing again.\n") unless defined $attrib_id;
+  die(localtime()." ERROR: No attribute 'trait' was found in attrib table!\nCleanup the tmp tables 'temp_sv' and 'temp_sv_phenotype' before importing again.\n") unless defined $attrib_id;
 
   return $attrib_id;
 }
@@ -1224,7 +1246,7 @@ sub get_header_info {
     ($label, $info) = split(' ', $line);
   } 
   elsif ($line =~ /\:/) {
-    $line =~ /^(.+)\:\s+(.+)$/;
+    $line =~ /^(.+?)\:\s+(.+)$/;
     $label = $1;
     $info  = $2;
   }
@@ -1250,7 +1272,7 @@ sub get_header_info {
   $h->{study}        = (split(' ',$info))[0] if ($label =~ /Study.+accession/i);
 
   # COSMIC study_type = 'Collection' but display name = 'COSMIC'
-  $somatic_study = 1 if ($h->{study_type} =~ /(somatic)|(tumor)/i || $h->{author} =~ /COSMIC/);
+  $somatic_study = 1 if (($h->{study_type} && $h->{study_type} =~ /(somatic)|(tumor)/i) || ($h->{author} && $h->{author} =~ /COSMIC/));
 
   # Publication information
   if ($label =~ /Publication/i && $info !~ /Not.+applicable/i) {
@@ -1352,7 +1374,7 @@ sub get_header_info {
     }
   }
 
-  $h->{author} =~ s/\s/_/g;
+  $h->{author} =~ s/\s/_/g if($h->{author});
 
   return $h;
 }
@@ -1510,19 +1532,25 @@ sub parse_9th_col {
     }
 
     if ($key eq 'clinical_significance' || $key eq 'clinical_int'){
+
+      # Convert encoded string, example: Likely%20pathogenic
+      $value = uri_unescape($value);
+      $value = lc($value);
+
       # Conflicting is not accepted in clinical significance column but shorten anyway
-      $value =~ s/Conflicting interpretations of pathogenicity/conflicting/;
+      $value =~ s/conflicting interpretations of pathogenicity/conflicting/;
       $value =~ s/conflicting data from submitters/conflicting/;
 
       # Replace unsupported character, example: 'benign/likely benign' -> 'benign,likely benign'
-      $value =~ s/\//,/;
-      $value =~ s/, /,/;
-      $info->{clinical} = lc($value);
+      $value =~ s/\//,/g;
+      $value =~ s/,\s+/,/g; # convert 'benign, association, risk factor' to 'benign,association,risk factor'
+      $value =~ s/pathogenic,low penetrance/pathogenic low penetrance/; # remove comma from values
+      $info->{clinical} = $value;
     }
 
     $info->{parent}      = $value if ($key eq 'Parent'); # Check how the 'parent' key is spelled
     $info->{is_somatic}  = 1 if ($key eq 'var_origin' && $value =~ /somatic/i);
-    $info->{bp_order}    = ($info->{submitter_variant_id} =~ /\w_(\d+)$/) ? $1 : undef;
+    $info->{bp_order}    = ($info->{submitter_variant_id} && $info->{submitter_variant_id} =~ /\w_(\d+)$/) ? $1 : undef;
     $info->{bp_order}    = 1 if ($info->{SO_term} =~ /translocation/i);
     $info->{status}      = 'High quality' if ($key eq 'variant_region_description' && $value =~ /high.quality/i);
     $info->{alias}       = $value if ($key eq 'Alias' && $value !~ /^\d+$/);
@@ -1563,6 +1591,9 @@ sub parse_9th_col {
       if($value =~ /46,/) {
         $value =~ s/46,/46-/g;
       }
+      if($value =~ /2,4-/) {
+        $value =~ s/2,4-/2-4-/g;
+      }
 
       if($value =~ /not_reported/ || $value =~ /not reported/ || $value =~ /not specified/ || $value =~ /not_specified/ || $value =~ /not_provided/ || $value =~ /not provided/) {
         $skip_phenotype = 1;
@@ -1574,6 +1605,9 @@ sub parse_9th_col {
         #Change back to comma
         if($phe =~ /46-/) {
           $phe =~ s/46-/46,/g;
+        }
+	if($phe =~ /2-4-/) {
+          $phe =~ s/2-4-/2,4-/g;
         }
 
         $phe = decode_text($phe);
@@ -1635,7 +1669,7 @@ sub parse_9th_col {
   $info->{is_ssv} = ($info->{ID} =~ /ssv/) ? 1 : 0;
 
   # Somatic alias
-  if ($info->{is_somatic} == 1 && $info->{alias} =~ /^(.+)_\d+$/) {
+  if (($info->{is_somatic} && $info->{is_somatic} == 1) && $info->{alias} =~ /^(.+)_\d+$/) {
     $info->{alias} = $1;
   }
 
@@ -1859,13 +1893,16 @@ sub post_processing_clinical_significance {
   foreach my $data (@{$all_clin_sign}){
     my $sv_id = $data->[0];
     my $clin_sign_dup = $data->[1];
-    my @clin_sign_list = split ',', $clin_sign_dup;
+
+    my @clin_sign_list = split (',', $clin_sign_dup);
+
     my %unique_clin_sign;
     foreach my $key (@clin_sign_list) {
       $unique_clin_sign{$key} = 1;
     }
     my @new_clin_sign_unique = keys %unique_clin_sign;
-    my $clin_sign_unique_final = join ',', @new_clin_sign_unique;
+
+    my $clin_sign_unique_final = join (',', @new_clin_sign_unique);
 
     $sth_insert_temp->execute($sv_id, $clin_sign_unique_final);
   }
@@ -1906,6 +1943,58 @@ sub meta_coord{
   $dbVar->do(qq{INSERT INTO meta_coord(table_name, coord_system_id, max_length) VALUES ('$svf_table', $cs, $max_length);});
 }
 
+sub update_internal_db {
+  debug(localtime()." Adding entries to internal database");
+
+  if(!$int_dba) {
+    print STDERR "No internal database connection found to write status\n";
+    return;
+  }
+
+  my $ensvardb_dba = $int_dba->get_EnsVardbAdaptor();
+  my $result_dba   = $int_dba->get_ResultAdaptor();
+  my $ensdb_name   = $vdb->dbc->dbname;
+
+  my $ensdb = $ensvardb_dba->fetch_by_name($ensdb_name);
+
+  # create EnsVardb
+  if(!$ensdb) {
+    # get ensembl version
+    my @split = split/\_/,$ensdb_name;
+    pop @split;
+    my $ens_version = pop @split;
+
+    $ensdb = Bio::EnsEMBL::IntVar::EnsVardb->new_fast({
+      name        => $ensdb_name,
+      species     => $species,
+      version     => $ens_version,
+      status_desc => 'Created'
+    });
+    $ensdb->genome_reference($target_assembly);
+    $ensvardb_dba->store($ensdb);
+  }
+
+  $ensvardb_dba->update_status($ensdb, 'structural_variation_run');
+
+  foreach my $st_name (@study_names) {
+    my $type = 'structural_variation_study';
+    ## set any previous results to non current for this type and species
+    if ($species =~ /homo|human/i) {
+      $result_dba->set_non_current_by_species_assembly_and_type($species, $target_assembly, $type, $st_name);
+    } else {
+      $result_dba->set_non_current_by_species_and_type($species, $type);
+    }
+
+    my $result = Bio::EnsEMBL::IntVar::Result->new_fast({ ensvardb     => $ensdb,
+                                                          result_value => $st_name,
+                                                          result_type  => $type,
+                                                          adaptor      => $result_dba
+                                                         });
+    $result_dba->store($result);
+  }
+
+  debug(localtime()." Entries added to internal database");
+}
 
 sub verifications {
   debug(localtime()." Verification of ftp links");
@@ -2027,7 +2116,7 @@ sub generate_data_row {
   my $somatic = shift;
  
   if(!defined($info->{bp_order})) {
-    if ($info->{is_somatic} == 1 || $somatic) {
+    if (($info->{is_somatic} && $info->{is_somatic} == 1) || $somatic) {
       $info->{bp_order} = 1;
     } else  {
       $info->{bp_order} = undef;
@@ -2035,7 +2124,7 @@ sub generate_data_row {
   }
   $info->{phenotype} = decode_text($info->{phenotype}) if($info->{phenotype}); 
 
-  my @row = map { $info->{$_} } @attribs;
+  my @row = map { $info->{$_} ? $info->{$_} : '' } @attribs;
 
   return \@row;
 }
@@ -2124,21 +2213,23 @@ sub get_hpo_phenotype {
 sub usage {
   die shift, qq{
 
-Options:
-  -species         : species name (required)
+Required arguments:
+  -species         : species name
+  -version         : date of data import in YYYYMM format -- e.g., 202210
+  -input_file      : file containing data dump (required if no input_dir)
+  -input_dir       : directory containing data dump (required if no input_file)
+
+Optional arguments:
+  -source_name     : name of data source (default: DGVa)
+  -registry        : registry file (default: ensembl.registry)
+  -replace         : flag to remove existing study data from the database before import (default: false)
   -target_assembly : assembly version to map to (optional)
-  -tmpdir          : (optional)
-  -tmpfile         : (optional)
-  -input_file      : file containing DGVa data dump (required if no input_dir)
-  -input_dir       : directory containing DGVa data dump (required if no input_file)
-  -mapping         : if set, the data will be mapped to $target_assembly using the Ensembl API
-  -gaps            : number of gaps allowed in mapping (defaults to 1) (optional)
-  -size_diff       : % difference allowed in size after mapping (optional)
-  -version         : version number of the data (required)
-  -registry        : registry file (optional)
-  -medgen_file     : Path to the unzipped MedGen file (see on ftp://ftp.ncbi.nlm.nih.gov/pub/medgen/csv/NAMES.csv.gz)
-  -hpo_file        : Path to the Human Phenotype Ontology (HPO) file (see on http://compbio.charite.de/hudson/job/hpo/lastSuccessfulBuild/artifact/hp/hp.obo)
-  -replace         : flag to remove the existing study data from the database before import them (optional)
-  -debug           : flag to keep the $temp_table table (optional)
+
+  -mapping         : if set, map data to $target_assembly using the Ensembl API (default: false)
+  -gaps            : number of gaps allowed in mapping (default: 1)
+  -debug           : flag to keep the temp_cnv table (default: false)
+
+  -medgen_file     : path to the unzipped MedGen file (see on https://ftp.ncbi.nlm.nih.gov/pub/medgen/csv/NAMES.csv.gz)
+  -hpo_file        : path to the Human Phenotype Ontology (HPO) file (see on http://compbio.charite.de/hudson/job/hpo/lastSuccessfulBuild/artifact/hp/hp.obo)
   };
 }

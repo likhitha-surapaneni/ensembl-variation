@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2021] EMBL-European Bioinformatics Institute
+Copyright [2016-2026] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -70,7 +70,9 @@ sub run {
     load($dbc, qw(variation_hgvs variation_id hgvs_name));
   }
 
-  $self->update_meta();
+  $dbc->do(qq{
+            DELETE from variation_hgvs where variation_id not in (select variation_id from variation);
+          }) if(-e $self->param('update_diff'));
 
   return;
 }
@@ -102,20 +104,5 @@ sub rejoin_table_files {
   rmtree($dir."/web_index_files");
 }
 
-sub update_meta{
-
-  my $self = shift;
-
-  my $var_dba  = $self->get_species_adaptor('variation');
-
-  my $var_dbh = $var_dba->dbc->db_handle;
-
-  my $update_meta_sth = $var_dbh->prepare(qq[ insert ignore into meta
-                                              ( meta_key, meta_value) values (?,?)
-                                            ]);
-
-  $update_meta_sth->execute('TranscriptEffect_run_date', $self->run_date() );
-
-}
 1;
 

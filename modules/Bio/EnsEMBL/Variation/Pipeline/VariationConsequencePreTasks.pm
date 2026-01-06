@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2021] EMBL-European Bioinformatics Institute
+Copyright [2016-2026] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -36,19 +36,113 @@ use warnings;
 use Bio::EnsEMBL::Variation::Utils::FastaSequence qw(setup_fasta);
 
 use File::Path qw(mkpath rmtree);
-
+use FileHandle;
 use base qw(Bio::EnsEMBL::Variation::Pipeline::BaseVariationProcess);
 
 sub fetch_input {
    
     my $self = shift;
+    my $include_lrg = $self->param('include_lrg');
+    # remove temporary files if they exist
+    my $dir = $self->param('pipeline_dir');
+    unless(-d $dir) {
+      mkpath($dir) or die "ERROR: Could not create directory $dir (required for dump files)\n";
+    }
 
-    my $mtmp = $self->param('mtmp_table');
-    
+    foreach my $folder_name (qw/web_index transcript_effect load_log/) {
+      rmtree($dir.'/'.$folder_name.'_files');
+      mkdir($dir.'/'.$folder_name.'_files') or die "ERROR: Could not make directory $dir/$folder_name\_files\n";
+    }
 
     # check for out of date seq_regions in variation database
     my $sequences_ok = $self->check_seq_region();
     die "Seq region ids are not compatible. Run ensembl-variation/scripts/misc/update_seq_region_ids.pl\n" unless $sequences_ok == 1;
+
+    my $update_diff = $self->param('update_diff');
+
+    if (defined($update_diff)) {
+      die "File used in flag --update_diff $update_diff does not exist\n" if !-e $update_diff;
+      rmtree($dir.'/del_log/vf_affected_by_removed_transcripts.txt');
+      rmdir($dir.'/del_log');
+      mkdir($dir.'/del_log') or die "ERROR: Could not make directory $dir/del_log\n";
+
+      open (DIFF, $update_diff) or die "Can't open file $update_diff: $!";
+
+      my $core_dba = $self->get_species_adaptor('core');
+      my $ta = $core_dba->get_TranscriptAdaptor;
+      my $var_dba = $self->get_species_adaptor('variation');
+      my $dbc = $var_dba->dbc;
+      my $tva = $var_dba->get_TranscriptVariationAdaptor;
+
+      my @delete_transcripts;
+      my %vf_ids;
+
+      while (<DIFF>) {
+        chomp;
+        next if /^transcript_id/;
+
+        my ($transcript_id, $status, $gene_id) = split(/\t/);
+        if($status eq "deleted") {
+          push @delete_transcripts, $transcript_id;
+
+        #Store all VFs in hash for dumping to file either via core transcript adaptor or direct SELECT from variation feature
+        if(defined($ta->fetch_by_stable_id($transcript_id)) ) {
+          my $transcript = $ta->fetch_by_stable_id($transcript_id);
+
+          for my $tvs (@{$tva->fetch_all_by_Transcripts( [$transcript] )} ) {
+             my $vf_id = $tvs->_variation_feature_id;
+             $vf_ids{$vf_id} = 1;
+           }
+
+          for my $tvss (@{$tva->fetch_all_somatic_by_Transcripts( [$transcript] )} ) {
+             my $vf_id = $tvss->_variation_feature_id;
+             $vf_ids{$vf_id} = 1;
+           }
+          }
+        
+          else{
+            my $wrapper = '"' . $transcript_id . '"';
+            my $sth = $dbc->prepare(qq[
+                                    SELECT DISTINCT(variation_feature_id)
+                                    FROM transcript_variation
+                                    WHERE feature_stable_id = $wrapper
+                                  ]);
+            $sth->execute();
+            my @deleted;
+            while(@deleted = $sth->fetchrow_array) {
+              $vf_ids{$deleted[0]} = 1;
+            }
+            @deleted=();
+            $sth->finish;
+          }
+        }
+        $include_lrg = 0;
+      }
+
+      # Dump VFs affected by deletion to file for updating later (in updateVF)
+      my $vfdel_fh = FileHandle->new();
+      $vfdel_fh->open(">" .$self->param('pipeline_dir'). "/del_log/vf_affected_by_removed_transcripts.txt") or die "Cannot open dump file " . $!;
+      print $vfdel_fh $_,"\n" for keys %vf_ids;
+      $vfdel_fh->close();
+
+      $include_lrg = 0; #Switch off as tends to be set to 1 in setup
+
+      # Remove Deleted transcripts 
+      while (my @batch = splice(@delete_transcripts, 0, 500) ) {
+        my $joined_ids = '"' . join('", "', @batch) . '"';
+            
+        $dbc->do(qq{
+                DELETE FROM  transcript_variation
+                WHERE   feature_stable_id IN ($joined_ids);
+             }) or die "Deleting stable ids failed";
+
+        $dbc->do(qq{
+                  DELETE FROM  MTMP_transcript_variation
+                  WHERE   feature_stable_id IN ($joined_ids);
+            }); 
+        }
+      return;
+    }
 
     my $core_dba = $self->get_species_adaptor('core');
     my $var_dba = $self->get_species_adaptor('variation');
@@ -61,33 +155,24 @@ sub fetch_input {
     }) if $self->param('sort_variation_feature');
 
 
-      # truncate the table because we don't want duplicates
-      $dbc->do("TRUNCATE TABLE transcript_variation");
+    # truncate the table because we don't want duplicates
+    $dbc->do("TRUNCATE TABLE transcript_variation");
 
-      # disable the indexes on the table we're going to insert into as
-      # this significantly speeds up the TranscriptEffect process
+    # disable the indexes on the table we're going to insert into as
+    # this significantly speeds up the TranscriptEffect process
 
-      $dbc->do("ALTER TABLE transcript_variation DISABLE KEYS");
+    $dbc->do("ALTER TABLE transcript_variation DISABLE KEYS");
 
-      # truncate tables incase TranscriptVariation is being updated for a pre-existing database
-      $dbc->do("TRUNCATE TABLE variation_hgvs");
-      $dbc->do("ALTER TABLE variation_hgvs DISABLE KEYS");
+    # truncate tables incase TranscriptVariation is being updated for a pre-existing database
+    $dbc->do("TRUNCATE TABLE variation_hgvs");
+    $dbc->do("ALTER TABLE variation_hgvs DISABLE KEYS");
 
-      # remove temporary files if they exist
-      my $dir = $self->param('pipeline_dir');
-      unless(-d $dir) {
-        mkpath($dir) or die "ERROR: Could not create directory $dir (required for dump files)\n";
-      }
+    my @rebuild = qw(transcript_variation variation_hgvs);
 
-      foreach my $folder_name (qw/web_index transcript_effect load_log/) {
-        rmtree($dir.'/'.$folder_name.'_files');
-        mkdir($dir.'/'.$folder_name.'_files') or die "ERROR: Could not make directory $dir/$folder_name\_files\n";
-      }
-
-      my @rebuild = qw(transcript_variation variation_hgvs);
+    my $mtmp = $self->param('mtmp_table');
 
       # set up MTMP table
-      if($mtmp) {
+    if($mtmp) {
         my @exclude = qw(transcript_variation_id hgvs_genomic hgvs_protein hgvs_transcript somatic codon_allele_string);
         my ($source_table, $table) = qw(transcript_variation MTMP_transcript_variation);
 
@@ -149,7 +234,7 @@ sub write_output {
 
 ## check for out of date seq_regions in variation database
 ## human patches can change between releases. such differences break TranscriptEffect
-sub check_seq_region{
+sub check_seq_region {
 
    my $self = shift;
 

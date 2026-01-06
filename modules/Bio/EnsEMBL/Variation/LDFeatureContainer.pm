@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2021] EMBL-European Bioinformatics Institute
+Copyright [2016-2026] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -371,7 +371,6 @@ sub get_all_ld_values {
           $ld_value{'variation1'} = $pos2vf->{$vf1_pos};
           $ld_value{'variation2'} = $pos2vf->{$vf2_pos};
         }
-        # $DB::single = 1 unless $ld_value{'variation1'} && $ld_value{'variation2'};
         next unless $ld_value{'variation1'} && $ld_value{'variation2'};
       }
       if ($vf_name) {

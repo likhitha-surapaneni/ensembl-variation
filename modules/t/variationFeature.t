@@ -1,5 +1,5 @@
 # Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-# Copyright [2016-2021] EMBL-European Bioinformatics Institute
+# Copyright [2016-2026] EMBL-European Bioinformatics Institute
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -341,6 +341,7 @@ $mfvs = $vf6->get_all_MotifFeatureVariations([$motif_feature]);
 ok($mfvs->[0]->feature_stable_id eq 'ENSR00000636355', 'get_all_MotifFeatureVariations, motif_feature');
 
 # test spdi genomic
+# To do: SPDI annotation should be updated from chrom number to synonym, i.e: 13 -> NC_000013.10
 my $spdi_notation_3 = $vf3->spdi_genomic();
 ok($spdi_notation_3->{'T'} eq 'NC_000013.10:32954008:C:T', 'SPDI genomic valid substitution - alt allele 1');
 ok($spdi_notation_3->{'G'} eq 'NC_000013.10:32954008:C:G', 'SPDI genomic valid substitution - alt allele 2');

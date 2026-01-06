@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2021] EMBL-European Bioinformatics Institute
+Copyright [2016-2026] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -81,6 +81,8 @@ sub new {
     $adaptor,
     $use_seq_region_synonyms,
     $tmpdir,
+    $track_name,
+    $use_vcf_consequences,
   ) = rearrange(
     [qw(
       ID
@@ -98,6 +100,8 @@ sub new {
       ADAPTOR
       USE_SEQ_REGION_SYNONYMS
       TMPDIR
+      TRACK_NAME
+      USE_VCF_CONSEQUENCES
     )],
     @_
   ); 
@@ -124,7 +128,9 @@ sub new {
     updated => $updated,
     is_remapped => $is_remapped,
     use_seq_region_synonyms => $use_seq_region_synonyms,
+    use_vcf_consequences => $use_vcf_consequences,
     tmpdir => $tmpdir || cwd(),
+    track_name => $track_name,
   );
   
   bless(\%collection, $class);
@@ -327,6 +333,42 @@ sub use_seq_region_synonyms {
   my $self = shift;
   $self->{use_seq_region_synonyms} = shift if @_;
   return $self->{use_seq_region_synonyms};
+}
+
+=head2 track_name
+  Arg [1]    : string $track_name(optional)
+               The new value to set the track_name attribute to
+  Example    : my $track_name = $collection->track_name()
+  Description: Getter/Setter for the parameter that tells the API to 
+               set the track name in Genome browser
+  Returntype : string
+  Caller     : general
+  Status     : Stable
+=cut
+
+sub track_name {
+  my $self = shift;
+  $self->{track_name} = shift if @_;
+  return $self->{track_name};
+}
+
+=head2 use_vcf_consequences
+
+  Arg [1]    : int $use_vcf_consequences(optional)
+               The new value to set the use_vcf_consequences attribute to
+  Example    : my $use_vcf_consequences = $collection->use_vcf_consequences()
+  Description: Getter/Setter for the parameter that tells the API to 
+               fetch consequences from VCF
+  Returntype : bool
+  Caller     : general
+  Status     : Stable
+
+=cut
+
+sub use_vcf_consequences {
+  my $self = shift;
+  $self->{use_vcf_consequences} = shift if @_;
+  return $self->{use_vcf_consequences};
 }
 
 =head2 created

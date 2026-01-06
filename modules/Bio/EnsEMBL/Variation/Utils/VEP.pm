@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2021] EMBL-European Bioinformatics Institute
+Copyright [2016-2026] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -86,6 +86,7 @@ use Bio::EnsEMBL::Variation::DBSQL::VariationFeatureAdaptor;
 use Bio::EnsEMBL::Variation::Utils::VariationEffect qw(overlap);
 use Bio::EnsEMBL::Utils::Sequence qw(reverse_comp);
 use Bio::EnsEMBL::Variation::Utils::Sequence qw(unambiguity_code SO_variation_class);
+use Bio::EnsEMBL::Variation::Utils::Config qw(%SO_TERMS);
 use Bio::EnsEMBL::Variation::Utils::EnsEMBL2GFF3;
 use Bio::EnsEMBL::Variation::StructuralVariationFeature;
 use Bio::EnsEMBL::Variation::DBSQL::StructuralVariationFeatureAdaptor;
@@ -113,6 +114,8 @@ use vars qw(@ISA @EXPORT_OK);
 @ISA = qw(Exporter);
 
 @EXPORT_OK = qw(
+    &_valid_region_regex
+    &check_format
     &detect_format
     &parse_line
     &vf_to_consequences
@@ -189,6 +192,7 @@ our @EXTRA_HEADERS = (
   { flag => 'flag_pick_allele',cols => ['PICK'] },
   { flag => 'variant_class',   cols => ['VARIANT_CLASS']},
   { flag => 'minimal',         cols => ['MINIMISED']},
+  { flag => 'clinvar_somatic_classification', cols => ['CLINVAR_SOMATIC_CLASSIFICATION']},
 
   # gene-related
   { flag => 'symbol',          cols => ['SYMBOL','SYMBOL_SOURCE','HGNC_ID'] },
@@ -307,6 +311,7 @@ our %COL_DESCS = (
     'GENE_PHENO'         => 'Indicates if gene is associated with a phenotype, disease or trait',
     'MINIMISED'          => 'Alleles in this variant have been converted to minimal representation before consequence calculation',
     'HGVS_OFFSET'        => 'Indicates by how many bases the HGVS notations for this variant have been shifted',
+    'CLINVAR_SOMATIC_CLASSIFICATION' => 'ClinVar somatic classification of the dbSNP variant',
 );
 
 our @REG_FEAT_TYPES = qw(
@@ -348,7 +353,7 @@ our @VAR_CACHE_COLS = qw(
     phenotype_or_disease
 );
 
-our @PICK_ORDER = qw(canonical appris tsl biotype ccds rank length ensembl refseq);
+our @PICK_ORDER = qw(mane_select mane_plus_clinical canonical appris tsl biotype ccds rank length ensembl refseq);
 
 # parses a line of input, returns VF object(s)
 sub parse_line {
@@ -382,57 +387,76 @@ sub parse_line {
     return $vfs;
 }
 
+sub _valid_region_regex {
+  return qr/^([^:]+):(\d+)-(\d+)(:[-\+]?1)?[\/:]([a-z0-9:]{3,}|[ACGTN-]+)$/i;
+}
+
+# sub-routine to check format of string
+sub check_format {
+    my @line = @_;
+    my $format;
+
+    # any changes here must be copied to the JavaScript file to run instant VEP:
+    # public-plugins/tools/htdocs/components/20_VEPForm.js
+
+    # region: chr21:10-10:1/A
+    if ( scalar @line == 1 && $line[0] =~ &_valid_region_regex() ) {
+        $format = 'region';
+    }
+
+    # SPDI: NC_000016.10:68684738:G:A
+    elsif ( scalar @line == 1 && $line[0] =~ /^(.*?\:){2}([^\:]+|)$/i ) {
+        $format = 'spdi';
+    }
+
+    # CAID: CA9985736
+    elsif ( scalar @line == 1 && $line[0] =~ /^CA\d{1,}$/i ) {
+        $format = 'caid';
+    }
+
+    # HGVS: ENST00000285667.3:c.1047_1048insC
+    elsif (
+        scalar @line == 1 &&
+        $line[0] =~ /^([^\:]+)\:.*?([cgmrp]?)\.?([\*\-0-9]+.*)$/i
+    ) {
+        $format = 'hgvs';
+    }
+
+    # variant identifier: rs123456
+    elsif ( scalar @line == 1 ) {
+        $format = 'id';
+    }
+
+    # VCF: 20  14370  rs6054257  G  A  29  0  NS=58;DP=258;AF=0.786;DB;H2  GT:GQ:DP:HQ
+    elsif (
+        $line[0] =~ /(chr)?\w+/ &&
+        $line[1] =~ /^\d+$/ &&
+        exists $line[3] && $line[3] =~ /^[ACGTN\-\.]+$/i &&
+        exists $line[4]
+    ) {
+        $format = 'vcf';
+    }
+
+    # ensembl: 20  14370  14370  A/G  +
+    elsif (
+        $line[0] =~ /\w+/ &&
+        $line[1] =~ /^\d+$/ &&
+        exists $line[2] && $line[2] =~ /^\d+$/ &&
+        exists $line[3] && $line[3] =~ /([a-z]{2,})|([ACGTN-]+\/[ACGTN-]+)/i
+    ) {
+        $format = 'ensembl';
+    }
+    return $format;
+}
+
 # sub-routine to detect format of input
 sub detect_format {
     my $line = shift;
     my @data = split /\s+/, $line;
 
-    # SPDI: NC_000016.10:68684738:G:A
-    if (
-      scalar @data == 1 &&
-      $data[0] =~ /^(.*?\:){2}([^\:]+|)$/i
-    ) {
-      return 'spdi';
-    }
-
-    # HGVS: ENST00000285667.3:c.1047_1048insC
-    elsif (
-        scalar @data == 1 &&
-        $data[0] =~ /^([^\:]+)\:.*?([cgmrp]?)\.?([\*\-0-9]+.*)$/i
-    ) {
-        return 'hgvs';
-    }
-
-    # variant identifier: rs123456
-    elsif (
-        scalar @data == 1
-    ) {
-        return 'id';
-    }
-
-    # VCF: 20  14370  rs6054257  G  A  29  0  NS=58;DP=258;AF=0.786;DB;H2  GT:GQ:DP:HQ
-    elsif (
-        $data[0] =~ /(chr)?\w+/ &&
-        $data[1] =~ /^\d+$/ &&
-        $data[3] =~ /^[ACGTN\-\.]+$/i &&
-        $data[4] && $data[4] =~ /^([\.ACGTN\-\*]+\,?)+$|^(\<[\w]+\>)$/i
-    ) {
-        return 'vcf';
-    }
-
-    # ensembl: 20  14370  14370  A/G  +
-    elsif (
-        $data[0] =~ /\w+/ &&
-        $data[1] =~ /^\d+$/ &&
-        $data[2] =~ /^\d+$/ &&
-        $data[3] =~ /(ins|dup|del)|([ACGTN-]+\/[ACGTN-]+)/i
-    ) {
-        return 'ensembl';
-    }
-
-    else {
-        die("ERROR: Could not detect input file format\n");
-    }
+    my $format = &check_format(@data);
+    die "ERROR: Could not detect input file format\n" unless $format;
+    return $format;
 }
 
 # parse a line of Ensembl format input into a variation feature object
@@ -457,12 +481,7 @@ sub parse_ensembl {
         my $so_term;
 
         # convert to SO term
-        my %terms = (
-            INS  => 'insertion',
-            DEL  => 'deletion',
-            TDUP => 'tandem_duplication',
-            DUP  => 'duplication'
-        );
+        my %terms = %SO_TERMS;
 
         $so_term = defined $terms{$allele_string} ? $terms{$allele_string} : $allele_string;
 
@@ -610,12 +629,7 @@ sub parse_vcf {
 
         if(defined($type)) {
             # convert to SO term
-            my %terms = (
-                INS  => 'insertion',
-                DEL  => 'deletion',
-                TDUP => 'tandem_duplication',
-                DUP  => 'duplication'
-            );
+            my %terms = %SO_TERMS;
 
             $so_term = defined $terms{$type} ? $terms{$type} : $type;
         }
@@ -912,12 +926,7 @@ sub convert_to_vcf {
     else {
 
         # convert to SO term
-        my %terms = (
-            'insertion' => 'INS',
-            'deletion' => 'DEL',
-            'tandem_duplication' => 'TDUP',
-            'duplication' => 'DUP'
-        );
+        my %terms = %SO_TERMS;
 
         my $alt = '<'.($terms{$vf->class_SO_term} || $vf->class_SO_term).'>';
 
@@ -2204,6 +2213,8 @@ sub pick_worst_vfoa {
       appris => 100,
       ensembl => 1,
       refseq => 1,
+      mane_select => 1,
+      mane_plus_clinical => 1
     };
 
     if($vfoa->isa('Bio::EnsEMBL::Variation::TranscriptVariationAllele')) {
@@ -2213,6 +2224,8 @@ sub pick_worst_vfoa {
       $info->{canonical} = $tr->is_canonical ? 0 : 1;
       $info->{biotype} = $tr->biotype eq 'protein_coding' ? 0 : 1;
       $info->{ccds} = $tr->{_ccds} && $tr->{_ccds} ne '-' ? 0 : 1;
+      $info->{mane_select} = scalar(grep {$_->code eq 'MANE_Select'}  @{$tr->get_all_Attributes()}) ? 0 : 1;
+      $info->{mane_plus_clinical} = scalar(grep {$_->code eq 'MANE_Plus_Clinical'}  @{$tr->get_all_Attributes()}) ? 0 : 1;
       $info->{lc($tr->{_source_cache})} = 0 if exists($tr->{_source_cache});
 
       # "invert" length so longer is best
@@ -4804,7 +4817,6 @@ sub cache_transcripts {
 
                         # in human and mouse otherfeatures DB, there may be duplicate genes
                         # skip those from analysis refseq_human_import and refseq_mouse_import
-                        # $DB::single = 1;
                         next if defined($config->{refseq}) && $config->{assembly} !~ /GRCh37/i && $tr->analysis && $tr->analysis->logic_name =~ /^refseq_[a-z]+_import$/;
 
                         $tr->{_gene_stable_id} = $gene_stable_id;
@@ -4875,7 +4887,7 @@ sub clean_transcript {
     # clean attributes
     if(defined($tr->{attributes})) {
         my @new_atts;
-        my %keep = map {$_ => 1} qw(gencode_basic miRNA ncRNA cds_start_NF cds_end_NF TSL appris rseq_mrna_match rseq_mrna_nonmatch rseq_5p_mismatch rseq_cds_mismatch rseq_3p_mismatch rseq_nctran_mismatch rseq_no_comparison rseq_ens_match_wt rseq_ens_match_cds rseq_ens_no_match enst_refseq_compare);
+        my %keep = map {$_ => 1} qw(gencode_basic gencode_primary miRNA ncRNA cds_start_NF cds_end_NF TSL appris rseq_mrna_match rseq_mrna_nonmatch rseq_5p_mismatch rseq_cds_mismatch rseq_3p_mismatch rseq_nctran_mismatch rseq_no_comparison rseq_ens_match_wt rseq_ens_match_cds rseq_ens_no_match enst_refseq_compare);
         foreach my $att(@{$tr->{attributes}}) {
             delete $att->{description};
             push @new_atts, $att if defined($keep{$att->{code}});
@@ -6124,14 +6136,6 @@ sub build_full_cache {
   # this happens for Y in human; we only want the longest one
   my %by_name;
   $by_name{$_->seq_region_name}++ for @slices;
-  # @slices = ();
-  #
-  # $DB::single = 1;
-  #
-  # foreach my $name(keys %by_name) {
-  #   my @sorted = sort {$a->length <=> $b->length} @{$by_name{$name}};
-  #   push @slices, $sorted[-1];
-  # }
 
   debug("Going to dump features from ".(scalar @slices)." regions") unless defined($config->{quiet});
 
