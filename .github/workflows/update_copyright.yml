@@ -18,7 +18,7 @@ name: "Update Copyright year at the start of every year"
 on: 
   workflow_dispatch:
   schedule:
-    - cron: '40 11 6 1 *'  # At 00:00 on January 1st every year
+    - cron: '15 15 1 1 *'  # At 15:15 on January 1st every year
 
 jobs:
   copyright-update:
@@ -33,7 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: master
+          ref: main
       - name: Update Copyright files
         run: |
           last_year=$(date +%Y --date='1 year ago')
@@ -50,5 +50,5 @@ jobs:
         env: 
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: | 
-          gh pr create -B master -H $branch_name --title "Update Copyright year" --body 'Created by Github action'
+          gh pr create -B main -H $branch_name --title "Update Copyright year" --body 'Created by Github action'
       
