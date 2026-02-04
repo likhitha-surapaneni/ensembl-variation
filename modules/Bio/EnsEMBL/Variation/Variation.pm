@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2021] EMBL-European Bioinformatics Institute
+Copyright [2016-2026] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -1273,6 +1273,17 @@ sub get_all_PhenotypeFeatures {
     
     # Get the annotations from the database
     return $self->adaptor->db->get_PhenotypeFeatureAdaptor()->fetch_all_by_Variation($self);
+
+}
+
+sub get_all_PhenotypeFeatures_Somatic {
+    my $self = shift;
+
+    #Assert the adaptor reference
+    assert_ref($self->adaptor(),'Bio::EnsEMBL::Variation::DBSQL::BaseAdaptor');
+    
+    # Get the annotations from the database
+    return $self->adaptor->db->get_PhenotypeFeatureAdaptor()->fetch_all_somatic_by_Variation($self);
 
 }
 

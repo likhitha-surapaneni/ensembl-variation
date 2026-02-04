@@ -1,5 +1,5 @@
 # Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-# Copyright [2016-2021] EMBL-European Bioinformatics Institute
+# Copyright [2016-2026] EMBL-European Bioinformatics Institute
 # 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ my $name         = 'estd1';
 my %study_list   = ( $name => 4237, 'estd55' => 4246 );
 my @study_IDs    = sort {$a <=> $b} values(%study_list);
 my $description  = 'Redon 2006 "Global variation in copy number in the human genome." PMID:17122850 [remapped from build NCBI35]';
-my $url          = 'ftp://ftp.ebi.ac.uk/pub/databases/dgva/estd1_Redon_et_al_2006';
+my $url          = 'https://ftp.ebi.ac.uk/pub/databases/dgva/estd1_Redon_et_al_2006';
 my $type         = 'Control Set';
 my $external_ref = 'pubmed/17122850';
 

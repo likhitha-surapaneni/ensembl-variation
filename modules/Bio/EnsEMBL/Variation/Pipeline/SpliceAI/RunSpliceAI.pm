@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2021] EMBL-European Bioinformatics Institute
+Copyright [2016-2026] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -51,6 +51,7 @@ sub run_spliceai {
   my $split_vcf_output_dir = $self->param_required('split_vcf_output_dir');
   my $fasta_file = $self->param_required('fasta_file');
   my $gene_annotation = $self->param_required('gene_annotation');
+  my $masked_scores = $self->param_required('masked_scores');
 
   my $chr = $self->param('chr');
 
@@ -67,8 +68,19 @@ sub run_spliceai {
     die("Directory ($output_vcf_files_dir) doesn't exist");
   }
 
-  my $cmd = "spliceai -I $vcf_input_dir_chr/$vcf_file -O $output_vcf_files_dir/$vcf_file -R $fasta_file -A $gene_annotation";
-  $self->run_system_command($cmd);
+  my $tmp_dir = $main_dir . "/tmp";
+
+  # activate conda env
+  my $activate_env = "export PATH=/hps/software/users/ensembl/variation/conda/miniconda3/bin && source /hps/software/users/ensembl/variation/conda/miniconda3/etc/profile.d/conda.sh && conda activate spliceai";
+
+  my $cmd = "spliceai -I $vcf_input_dir_chr/$vcf_file -O $output_vcf_files_dir/$vcf_file -R $fasta_file -A $gene_annotation -B 4096 -T 256 -t $tmp_dir";
+
+  # Add option to calculate masked scores
+  if($masked_scores) {
+    $cmd .= " -M 1";
+  }
+
+  $self->run_system_command("$activate_env && $cmd");
 
 }
 

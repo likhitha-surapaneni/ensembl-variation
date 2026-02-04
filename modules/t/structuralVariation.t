@@ -1,5 +1,5 @@
 # Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-# Copyright [2016-2021] EMBL-European Bioinformatics Institute
+# Copyright [2016-2026] EMBL-European Bioinformatics Institute
 # 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -52,7 +52,7 @@ my $source = Bio::EnsEMBL::Variation::Source->new
 
 ## need Study object 
 my $study_name = 'estd59';
-my $study_url = 'ftp://ftp.ebi.ac.uk/pub/databases/dgva/estd59_1000_Genomes_Consortium_Pilot_Project';
+my $study_url = 'https://ftp.ebi.ac.uk/pub/databases/dgva/estd59_1000_Genomes_Consortium_Pilot_Project';
 my $study_description = '1000 Genomes Project Consortium - Pilot Project. PMID:20981092';
 
 my $study = Bio::EnsEMBL::Variation::Study->new

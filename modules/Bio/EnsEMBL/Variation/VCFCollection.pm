@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2021] EMBL-European Bioinformatics Institute
+Copyright [2016-2026] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -70,7 +70,7 @@ package Bio::EnsEMBL::Variation::VCFCollection;
 
 use Cwd;
 use Scalar::Util qw(weaken);
-
+use List::MoreUtils qw/zip/;
 use Bio::EnsEMBL::Utils::Exception qw(throw warning);
 use Bio::EnsEMBL::Utils::Argument qw(rearrange);
 use Bio::EnsEMBL::Utils::Scalar qw(check_ref assert_ref);
@@ -78,6 +78,8 @@ use Bio::EnsEMBL::Utils::Sequence qw(reverse_comp);
 use Bio::EnsEMBL::Variation::Utils::VEP qw(parse_line);
 use Bio::EnsEMBL::Variation::Utils::Sequence qw(get_matched_variant_alleles);
 use Bio::EnsEMBL::Variation::Utils::VariationEffect qw(MAX_DISTANCE_FROM_TRANSCRIPT);
+use Bio::EnsEMBL::Variation::Utils::Constants qw(%OVERLAP_CONSEQUENCES);
+use Bio::EnsEMBL::Variation::Utils::Config qw(%ATTRIBS);
 
 use Bio::EnsEMBL::IO::Parser::VCF4Tabix;
 use Bio::EnsEMBL::Variation::SampleGenotypeFeature;
@@ -86,6 +88,7 @@ use Bio::EnsEMBL::Variation::Individual;
 use Bio::EnsEMBL::Variation::Population;
 use Bio::EnsEMBL::Variation::VCFVariationFeature;
 use Bio::EnsEMBL::Variation::IntergenicVariation;
+use Bio::EnsEMBL::Variation::OverlapConsequence; 
 
 use base qw(Bio::EnsEMBL::Variation::BaseAnnotation);
 
@@ -105,6 +108,7 @@ my $MAX_OPEN_FILES = 2;
   Arg [-STRICT_NAME_MATCH]:      boolean
   Arg [-REF_FREQ_INDEX]:         int - index position of ref frequency in INFO field, if given
   Arg [-USE_SEQ_REGION_SYNONYMS]:boolean
+  Arg [-USE_VCF_CONSEQUENCES]:boolean
   Arg [-ADAPTOR]:                Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor
 
   Example    : my $collection = Bio::EnsEMBL::Variation::VCFCollection->new(
@@ -444,12 +448,10 @@ sub get_all_VariationFeatures_by_Slice {
     $slice = $sa->fetch_by_region($slice->coord_system_name, $slice->seq_region_name, $slice->start, $slice->end);
   }
   return [] unless $self->_seek_by_Slice($slice);
-  
   my $vcf = $self->_current();
   my $vfa = $self->use_db ? $self->adaptor->db->get_VariationFeatureAdaptor : Bio::EnsEMBL::Variation::DBSQL::VariationFeatureAdaptor->new_fake($self->species);
   
   my @vfs;
-  
   while($vcf->{record} && $vcf->get_start <= $slice->end) {
     
     my $copy = $vcf->get_frozen_copy();
@@ -468,29 +470,114 @@ sub get_all_VariationFeatures_by_Slice {
       
       push @vfs, $vcf_vf;
     }
-    
     $vcf->next();
   }
 
-  if($dont_fetch_vf_overlaps || !$self->use_db) {
-    foreach my $vf(@vfs) {
-      $vf->{intergenic_variation} = Bio::EnsEMBL::Variation::IntergenicVariation->new(
-        -variation_feature  => $vf,
-        -no_ref_check       => 1,
-      );
-      weaken($vf->{intergenic_variation}->{base_variation_feature});
+  if($dont_fetch_vf_overlaps || !$self->use_db) {   
+    my $metadata_info = $vcf->{metadata}->{INFO};
+    my $desc;
+    my $vcf_info_field;
+    foreach my $val ( @{$metadata_info} ){
+      if($val->{ID} eq 'CSQ'){
+        $desc = $val->{Description};
+        $vcf_info_field = 'CSQ';
+        last;
+      }
+      elsif($val->{ID} eq 'ANN'){
+        $desc = $val->{Description};
+        $vcf_info_field = 'ANN';
+        last;
+      }
+    }
+
+    foreach my $vf (@vfs) {
+      my $info = $vf->{vcf_record}->get_info;
+
+      # Add annotation from VEP or similar tools
+      if ($info->{'CSQ'} || $info->{'ANN'}) {
+
+        my @description = split(/Format:/,$desc);
+        my @info_format = split('\|', $description[1]);
+        
+        my $type = $info->{'CSQ'} ? 'CSQ' : 'ANN';
+        my @vcf_variants = $info->{$type};
+        foreach my $vcf_variant ( @vcf_variants ) {
+          if ( defined($vcf_variant) ){
+            my @transcript_vars = split(',',$vcf_variant);
+            foreach my $transcript_var ( @transcript_vars ){
+              my @transcript_split = split('\|',$transcript_var);
+              my %transcript_map = zip @info_format, @transcript_split;
+              next if not defined($transcript_map{'Feature_type'});
+              if ( $transcript_map{'Feature_type'} eq 'Transcript') {
+                my $tv = Bio::EnsEMBL::Variation::TranscriptVariation->new_fast({
+                  variation_feature  => $vf,
+                  _feature_stable_id => $transcript_map{'Feature'}
+                });  
+                #Add variation Feature seq from transcript map
+                my $tva = Bio::EnsEMBL::Variation::TranscriptVariationAllele->new_fast({
+                  variation_feature_seq => $transcript_split[0],
+                  is_reference               => 0
+                });
+                my @cons_list = split('&',$transcript_map{'Consequence'});
+                foreach my $con (@cons_list){
+                  if ( exists $OVERLAP_CONSEQUENCES{$con} ) {
+                    my $new_cons = $OVERLAP_CONSEQUENCES{$con};
+                    $tva->add_OverlapConsequence($new_cons);
+                  }
+                  else{
+                    print("The consequence is not available:",$con,"\n");
+                  }
+                }
+                $tv->add_TranscriptVariationAllele($tva);
+                $vf->add_TranscriptVariation($tv);
+              }
+            }
+          }
+        }
+      }
+      else {
+        $vf->{intergenic_variation} = Bio::EnsEMBL::Variation::IntergenicVariation->new(
+          -variation_feature  => $vf,
+          -no_ref_check       => 1,
+        );
+        weaken($vf->{intergenic_variation}->{base_variation_feature});
+      }
+
+      # ClinVar annotation
+      if($info->{'CLNSIG'}) {
+        my $clinsig_list = $ATTRIBS{clinvar_clin_sig};
+        my $vcf_variants_mix_case = $info->{'CLNSIG'};
+        my $vcf_variants = lc($vcf_variants_mix_case);
+
+        # Replace commas for specific examples that contain a comma,
+        # otherwise they would split/break these examples - comma is also a delimiter
+        $vcf_variants =~ s/pathogenic,_low_penetrance/pathogenic_low_penetrance/;
+        $vcf_variants =~ s/likely_pathogenic,_low_penetrance/likely_pathogenic_low_penetrance/;
+
+        my @clnsig_vars = split('[\|,/;]',$vcf_variants);
+        foreach my $clnsig_var (@clnsig_vars) {
+          $clnsig_var =~ s/_/ /g;
+          $clnsig_var =~ s/^\s+|\s+$//;
+          if (grep /^$clnsig_var$/, @{$clinsig_list}){
+            push @{ $vf->{clinical_significance} ||= [] }, $clnsig_var;
+          }
+        }
+      }
+
+      # Evidence frequency
+      if($info->{'AF'}) {
+        $vf->add_evidence_value('Frequency');
+      }
 
       $vf->_finish_annotation();
     }
   }
-
   else {
 
     ## we need to up-front fetch overlapping transcripts, regfeats and motiffeatures
     ## this prevents the API loading them per-variant later at great cost in speed
     ## not an easy way to do this generically in a loop, so done type-by-type
     my $db = $self->adaptor->db;
-
     # transcripts
     my @transcripts =
       map {$_->transfer($slice)}
@@ -500,7 +587,6 @@ sub get_all_VariationFeatures_by_Slice {
       \@vfs,
       \@transcripts
     ) if @transcripts;
-
     # funcgen types
     foreach my $type(qw(RegulatoryFeature MotifFeature)) {
       if(
@@ -516,6 +602,16 @@ sub get_all_VariationFeatures_by_Slice {
           \@vfs,
           \@features,
         ) if @features;
+      }
+    }
+
+    # Populate the evidence frequency for vcf-only species
+    foreach my $vf (@vfs) {
+      my $metadata_info = $vcf->{metadata}->{INFO};
+      my $info = $vf->{vcf_record}->get_info;
+
+      if($info->{'AF'}) {
+        $vf->add_evidence_value('Frequency');
       }
     }
 
@@ -1240,9 +1336,21 @@ sub _get_vcf_by_chr {
   if(!exists($self->{files}) || !exists($self->{files}->{$chr})) {
     my $obj;
     
-    # check we have this chromosome
+    # check we have this chromosome or its synonym
     if(my $chrs = $self->list_chromosomes) {
-      return unless grep {$chr eq $_} @$chrs;
+      unless ( (grep {$chr eq $_} @$chrs) || !$self->use_seq_region_synonyms) {
+        my @synonyms = @{$self->_get_synonyms_by_chr($chr)};
+
+        # also check with 'chr' prefix
+        push @synonyms, 'chr'.$chr;
+
+        my $matched = 0;
+        foreach my $synonym (@synonyms) {
+          $matched = 1 if grep {$synonym eq $_} @$chrs;
+        }
+
+        return unless $matched;
+      }
     }
     
     my $file = $self->_get_vcf_filename_by_chr($chr);

@@ -1,5 +1,5 @@
 # Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-# Copyright [2016-2021] EMBL-European Bioinformatics Institute
+# Copyright [2016-2026] EMBL-European Bioinformatics Institute
 # 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -48,6 +48,8 @@ my $c = Bio::EnsEMBL::Variation::VCFCollection->new(
     'HG00099' => ['pop4']
 },
   -use_seq_region_synonyms => 1,
+  -track_name              => "test_track",
+  -use_vcf_consequences => 1,
 );
 
 
@@ -58,6 +60,8 @@ ok($c->filename_template() eq $dir.'/test-genome-DBs/homo_sapiens/variation/test
 ok($c->sample_prefix() eq "s_prefix:", "sample_prefix");
 ok($c->population_prefix() eq "p_prefix:", "population_prefix");
 ok($c->use_seq_region_synonyms() eq "1", "use_seq_region_synonyms");
+ok($c->track_name() eq "test_track", "track_name");
+ok($c->use_vcf_consequences() eq "1", "use_vcf_consequences");
 ok($c->tmpdir() eq cwd(), "tmpdir");
 
 # tell it not to use the DB
@@ -149,9 +153,11 @@ ok($coll->assembly() eq "GRCh37", "assembly");
 ok($coll->source_name() eq "1000genomes", "source name");
 ok($coll->source_url() eq "http://www.1000genomes.org", "source URL");
 
+
 ok($coll->created() eq "1432745640000", "created");
 ok($coll->updated() eq "1432745640000", "updated");
 ok($coll->is_remapped() eq "1", "is_remapped");
+ok($coll->use_vcf_consequences() eq "1", "use vcf consequences");
 
 ok($coll->vcf_collection_close, 'close VCF collection filehandle');
 
@@ -481,5 +487,51 @@ is_deeply(
   ],
   'get_all_Alleles_by_VariationFeature - dbSNP uses ref_freq_index()'
 );
+
+# fetch consequences from VCF
+$coll = $vca->fetch_by_id('ExAC_0.3_corrected_INFO');
+$temp = $coll->filename_template();
+$temp =~ s/###t\-root###/$dir/;
+$coll->filename_template($temp);
+
+$slice = $sa->fetch_by_region('chromosome', '11');
+my $dont_fetch_vf_overlaps=1;
+my @vfs = @{$coll->get_all_VariationFeatures_by_Slice($slice,$dont_fetch_vf_overlaps)};
+my $cons = $vfs[1]->get_all_OverlapConsequences();
+if ($dont_fetch_vf_overlaps)
+{
+  ok(scalar @{$cons} eq 4, "get consequences from VCF");
+}
+
+# Test get_all_clinical_significance_states() with VCF files
+$coll = $vca->fetch_by_id('ClnSig');
+ok($coll && $coll->isa('Bio::EnsEMBL::Variation::VCFCollection'), "fetch_by_id");
+
+my $temp_clnsig_filename = $coll->filename_template();
+$temp_clnsig_filename =~ s/###t\-root###/$dir/;
+$coll->filename_template($temp_clnsig_filename);
+ok($coll->filename_template =~ /^$dir/, "update filename_template");
+
+$slice = $sa->fetch_by_region('toplevel', 1, 10, 20);
+$dont_fetch_vf_overlaps=1;
+my $vfs = $coll->get_all_VariationFeatures_by_Slice($slice, $dont_fetch_vf_overlaps);
+
+ok($vfs->[0]->get_all_clinical_significance_states()->[0] eq 'likely benign', 'get_all_clinical_significance_states - obtain single clinical significance entry');
+ok(scalar (@{$vfs->[1]->get_all_clinical_significance_states()}) eq 1, 'get_all_clinical_significance_states - ignore upsupported clinical significance entry');
+ok(scalar (@{$vfs->[2]->get_all_clinical_significance_states()}) eq 2, 'get_all_clinical_significance_states - obtain multiple clinical significance entries');
+
+# below check only works once we update supported list of ClinVar clinical significance entries (probably for release 110)
+#ok(scalar (@{$vfs->[3]->get_all_clinical_significance_states()}) eq 2 && $vfs->[3]->get_all_clinical_significance_states()->[0] eq , 'get_all_clinical_significance_states - process clinical significance entries with commas before delimiter split');
+
+# Test frequency evidence
+my $file_data = $vca->fetch_by_id('vcf_freq');
+ok($file_data && $file_data->isa('Bio::EnsEMBL::Variation::VCFCollection'), "fetch_by_id vcf_freq");
+my $temp_name = $file_data->filename_template();
+$temp_name =~ s/###t\-root###/$dir/;
+$file_data->filename_template($temp_name);
+
+$slice = $sa->fetch_by_region('chromosome', '2');
+my $vf_list = $file_data->get_all_VariationFeatures_by_Slice($slice, $dont_fetch_vf_overlaps);
+ok($vf_list->[0]->get_all_evidence_values()->[0] eq 'Frequency', 'get evidence value - Frequency');
 
 done_testing();

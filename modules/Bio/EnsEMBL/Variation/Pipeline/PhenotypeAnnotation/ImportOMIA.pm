@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2021] EMBL-European Bioinformatics Institute
+Copyright [2016-2026] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -46,7 +46,7 @@ use strict;
 use File::Path qw(make_path);
 use File::stat;
 use POSIX qw(strftime);
-use LWP::Simple;
+use LWP::UserAgent;
 use HTTP::Tiny;
 use Data::Dumper;
 
@@ -63,7 +63,6 @@ my %species = (
   61853 => 'gibbon',
   9925  => 'goat',
   9796  => 'horse',
-  9544  => 'macaque',
   10090 => 'mouse',
   13616 => 'opossum',
   9601  => 'orangutan',
@@ -88,7 +87,6 @@ my %species_synonyms = (
   'gibbon' => 'nomascus_leucogenys',
   'goat'  => 'capra_hircus',
   'horse' => 'equus_caballus',
-  'macaque'  => 'macaca_mulatta',
   'mouse' => 'mus_musculus',
   'opossum' => 'monodelphis_domestica',
   'orangutan' => 'pongo_abelii',
@@ -100,6 +98,13 @@ my %species_synonyms = (
   'turkey'  => 'meleagris_gallopavo',
   'zebra_finch' => 'taeniopygia_guttata',
   'zebrafish' => 'danio_rerio'
+);
+
+my %nonref_species = (
+  'gallus_gallus' => 'gallus_gallus_gca000002315v5',
+  'canis_lupus_familiaris' => 'canis_lupus_familiarisboxer',
+  'felis_catus' => 'felis_catus_abyssinian',
+  'ovis_aries' => 'ovis_aries_texel'
 );
 
 sub fetch_input {
@@ -147,7 +152,23 @@ sub fetch_input {
 
   #get input files OMIA gene_table, this file contains multiple species
   print $logFH "Found file (".$workdir_fetch."/".$file_omia.") and will skip new fetch\n" if -e $workdir_fetch."/".$file_omia;
-  getstore($omia_url, $workdir_fetch."/".$file_omia) unless -e $workdir_fetch."/".$file_omia;
+
+  unless(-e $workdir_fetch."/".$file_omia) {
+    my $ua = LWP::UserAgent->new;
+    $ua->agent('Mozilla/5.0');
+
+    my $response = $ua->get($omia_url);
+
+    if ($response->is_success) {
+      open(my $fh, '>', $workdir_fetch."/".$file_omia) or die "Could not open file '$file_omia': $!";
+      print $fh $response->decoded_content;
+      close($fh);
+      print $logFH "Succesfully downloaded OMIA file: ".$workdir_fetch."/".$file_omia."\n";
+    }
+    else {
+      die "Failed to fetch OMIA file: ".$response->status_line."\n";
+    }
+  }
   $source_info{source_version} = strftime("%Y%m%d", localtime(stat($workdir_fetch."/".$file_omia)->mtime));
 
   #get section specific for this species
@@ -183,6 +204,7 @@ sub run {
                                species => $self->required_param('species'),
                                run_type => $run_type,
                              });
+  $self->clean_dir;
 }
 
 sub write_output {
@@ -275,21 +297,16 @@ sub split_omia {
     close(OUT);
   }
 
-  #sheep is exception where it stands for ovis_aries and ovis_aries_rambouillet
-  if (-e  "$workdir/omia_split/$prefix"."ovis_aries".$suffix) {
-    my $cmd = "cp -p $workdir/omia_split/$prefix"."ovis_aries$suffix $workdir/omia_split/$prefix"."ovis_aries_rambouillet$suffix";
-    my ($return_value, $stderr, $flat_cmd) = $self->run_system_command($cmd);
-    if ($return_value) {
-      die("there was an error running as ($flat_cmd: $stderr)");
-    }
-  }
+  # copy OMIA data for non reference species
+  for my $r_species (keys %nonref_species) {
+    my $nr_species = $nonref_species{$r_species};
 
-  #dog stands for canis_lupus_familiaris and canis_lupus_familiarisboxer
-  if (-e  "$workdir/omia_split/$prefix"."canis_lupus_familiaris".$suffix) {
-    my $cmd = "cp -p $workdir/omia_split/$prefix"."canis_lupus_familiaris$suffix $workdir/omia_split/$prefix"."canis_lupus_familiarisboxer$suffix";
-    my ($return_value, $stderr, $flat_cmd) = $self->run_system_command($cmd);
-    if ($return_value) {
-      die("there was an error running as ($flat_cmd: $stderr)");
+    if (-e  "$workdir/omia_split/$prefix$r_species$suffix") {
+      my $cmd = "cp -p $workdir/omia_split/$prefix$r_species$suffix $workdir/omia_split/$prefix$nr_species$suffix";
+      my ($return_value, $stderr, $flat_cmd) = $self->run_system_command($cmd);
+      if ($return_value) {
+        die("there was an error running as ($flat_cmd: $stderr)");
+      }
     }
   }
 }

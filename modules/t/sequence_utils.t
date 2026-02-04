@@ -1,5 +1,5 @@
 # Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-# Copyright [2016-2021] EMBL-European Bioinformatics Institute
+# Copyright [2016-2026] EMBL-European Bioinformatics Institute
 # 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -113,6 +113,20 @@ is_deeply(
   trim_sequences(qw(A 0)),
   ['A', 0, 0, 0, 0],
   'trim_sequences Accept 0 as alt allele'
+);
+
+# test trimming on foward strand (default)
+is_deeply(
+  trim_sequences(qw(TCT TAG 183 185 1)),
+  ['CT', 'AG', 184, 185, 1],
+  'trim_sequences - foward strand (default)'
+);
+
+# test trimming on reverse strand
+is_deeply(
+  trim_sequences(qw(TCT TAG 183 185 1 0 -1)),
+  ['CT', 'AG', 183, 184, 1],
+  'trim_sequences - reverse strand'
 );
 
 throws_ok {trim_sequences(undef, 'A')} qr/Missing reference or alternate sequence/, 'trim_sequences - no ref';

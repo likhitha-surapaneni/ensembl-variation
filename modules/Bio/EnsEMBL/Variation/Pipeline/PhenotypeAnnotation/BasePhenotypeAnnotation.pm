@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2021] EMBL-European Bioinformatics Institute
+Copyright [2016-2026] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -43,8 +43,10 @@ use warnings;
 use DBI qw(:sql_types);
 use String::Approx qw(amatch adist);
 use Algorithm::Diff qw(diff);
+use File::Path qw(make_path);
+use Text::ParseWords;
 
-use Bio::EnsEMBL::Variation::Utils::SpecialChar qw(replace_char);
+use Bio::EnsEMBL::Variation::Utils::SpecialChar qw(replace_char replace_hex);
 
 use base ('Bio::EnsEMBL::Variation::Pipeline::BaseVariationProcess');
 
@@ -539,6 +541,9 @@ sub save_phenotypes {
   my %phenotype_cache = map {$_->description() => $_->dbID()} @{$phenotype_dba->fetch_all};
   $self->{phenotype_cache} = \%phenotype_cache;
 
+  # create another cache with phenotype clean description
+  $self->{clean_phenotype_cache} = $self->_create_clean_cache(\%phenotype_cache);
+
   my @ids;
   my %synonym;
   my @phenotypes;
@@ -689,12 +694,19 @@ sub dump_phenotypes {
   };
 
   my $db_adaptor    = $self->variation_db_adaptor;
+  my $err;
+  
+  make_path($self->workdir."/previous_data", {error => \$err});
+  die "make_path failed: ".Dumper($err) if $err && @$err;
 
-  _sql_to_file($pfa_select_stmt, $db_adaptor, $self->workdir."/"."pfa_".$source_name.".txt");
-  _sql_to_file($pf_select_stmt, $db_adaptor, $self->workdir."/"."pf_".$source_name.".txt");
-  _sql_to_file($p_extra_select_stmt, $db_adaptor, $self->workdir."/"."p_extra_".$source_name.".txt");
-  _sql_to_file($poa_extra_select_stmt, $db_adaptor, $self->workdir."/"."poa_extra_".$source_name.".txt");
+  opendir my $dh, $self->workdir."/previous_data" or die("ERROR: There was a problem opening the dumps directory: $!\n");
+  _sql_to_file($pfa_select_stmt, $db_adaptor, $self->workdir."/previous_data/"."pfa_".$source_name.".txt");
+  _sql_to_file($pf_select_stmt, $db_adaptor,  $self->workdir."/previous_data/"."pf_".$source_name.".txt");
+  _sql_to_file($p_extra_select_stmt, $db_adaptor, $self->workdir."/previous_data/"."p_extra_".$source_name.".txt");
+  _sql_to_file($poa_extra_select_stmt, $db_adaptor, $self->workdir."/previous_data/"."poa_extra_".$source_name.".txt");
 
+  closedir $dh;
+  
   if ($clean) {
     my $sth = $db_adaptor->dbc->prepare($pfa_delete_stmt);
     $sth->execute();
@@ -705,6 +717,28 @@ sub dump_phenotypes {
   }
 }
 
+sub clean_phenotype_tables {
+  my ($self) = @_;
+
+  my $delete_pheno_feature = qq{
+    DELETE from phenotype WHERE phenotype_id NOT IN (SELECT phenotype_id from phenotype_feature);
+  };
+   
+  my $delete_pheno_ontology_accesion = qq {
+    DELETE from phenotype_ontology_accession WHERE phenotype_id NOT IN (SELECT phenotype_id from phenotype);
+  };
+  my $sth;
+  my $db_adaptor    = $self->variation_db_adaptor;
+
+  $sth = $db_adaptor->dbc->prepare($delete_pheno_feature);
+  $sth->execute() or die "Error: could not delete phenotypes from phenotype table";
+
+  $sth = $db_adaptor->dbc->prepare($delete_pheno_ontology_accesion);
+  $sth->execute() or die "Error: could not delete entries from phenotype_ontology_accession table";
+
+  
+}
+
 #----------------------------
 # PRIVATE METHODS
 
@@ -712,6 +746,35 @@ sub dump_phenotypes {
 sub _phenotype_cache {
   my $self = shift;
   return $self->{phenotype_cache};
+}
+
+# getter for the internal phenotype_cache shared between methods
+sub _clean_phenotype_cache {
+  my $self = shift;
+  return $self->{clean_phenotype_cache};
+}
+
+# create the phenotype cache with clean phenotype descriptions
+sub _create_clean_cache{
+  my $self = shift;
+  my $phenotype_cache = shift;
+
+  my %new_phenotype_cache;
+
+  foreach my $phenotype_desc (keys %{$phenotype_cache}) {
+    my $original_desc = $phenotype_desc;
+    $phenotype_desc = $self->_clean_phenotype_desc($phenotype_desc, 1);
+    my @parse_desc = parse_line('\s+', 0, $phenotype_desc);
+    my @parse_desc_sorted = sort @parse_desc;
+    my $parse_desc_sorted_join = join(',', @parse_desc_sorted);
+
+    my %aux;
+    $aux{original_desc} = $original_desc;
+    $aux{id} = $phenotype_cache->{$original_desc};
+    push @{$new_phenotype_cache{$parse_desc_sorted_join}}, \%aux;
+  }
+
+  return \%new_phenotype_cache;
 }
 
 # getter for the internal sql statments handles shared between methods
@@ -1376,27 +1439,58 @@ sub _get_set_ids {
 
 }
 
-# clean up + search for phenotype in db, if not found it gets inserted
-sub _get_phenotype_id {
-  my ($self, $phenotype) = @_;
+sub _clean_phenotype_desc {
+  my ($self, $description, $type) = @_;
 
-  my %phenotype_cache = %{$self->_phenotype_cache};
-
-  my ($name, $description);
-  $name = $phenotype->{name};
-  $description = $phenotype->{description};
-
-  # Clean up
   $description =~ s/^\s+|\s+$//g; # Remove spaces at the beginning and the end of the description
   $description =~ s/\n//g; # Remove 'new line' characters
   $description =~ s/[\(\)]//g; # Remove characters ( )
 
   # Replace special characters in the phenotype description
   $description = replace_char($description);
+  $description = replace_hex($description);
+
+  if($type) {
+    $description = lc($description);
+    $description =~ s/\“//g;
+    $description =~ s/\”//g;
+    $description =~ s/\s+/ /g; # Remove extra space
+
+    # fix some typos
+    $description =~ s/sjoegren-larsson syndrome/sjogren-larsson syndrome/;
+    $description =~ s/sjorgren-larrson syndrome/sjogren-larsson syndrome/;
+    $description =~ s/marinesco-sjoegren syndrome/marinesco-sjogren syndrome/;
+    $description =~ s/birt-hogg-hub syndrome/birt-hogg-hube syndrome/;
+    $description =~ s/birt-hogg-hubt syndrome/birt-hogg-hube syndrome/;
+    $description =~ s/chtdiak-higashi syndrome/chediak-higashi syndrome/;
+    $description =~ s/papillon-leffvre syndrome/papillon-lefevre syndrome/;
+
+    # remove a few extra characters
+    $description =~ s/, / /g; # remove commas
+    $description =~ s/-/ /g;
+    $description =~ s/\'//g;
+  }
+
+  return $description;
+}
+
+# clean up + search for phenotype in db, if not found it gets inserted
+sub _get_phenotype_id {
+  my ($self, $phenotype) = @_;
+
+  my %phenotype_cache = %{$self->_phenotype_cache};
+  my %clean_phenotype_cache = %{$self->_clean_phenotype_cache};
+
+  my ($name, $description);
+  $name = $phenotype->{name};
+  $description = $phenotype->{description};
+
+  # Clean up
+  $description = $self->_clean_phenotype_desc($description, 0);
 
   # Check phenotype description in the format "description; name"
   if (!defined($name) || $name eq '') {
-    my ($p_desc,$p_name) = split(";",$description);
+    my ($p_desc,$p_name) = split(/;/,$description);
     if ($p_name) {
       $p_name =~ s/ //g;
       if ($p_name =~ /^\w+$/) {
@@ -1404,18 +1498,27 @@ sub _get_phenotype_id {
         $name = $p_name;
       }
     }
+
+    # Check phenotype description in the format "description: name"
+    my ($pheno_desc,$pheno_name) = split(/: /,$description);
+    if ($pheno_name) {
+      if ($pheno_name =~ /^\w+$/) {
+        $description = $pheno_desc;
+        $name = $pheno_name;
+      }
+    }
   }
 
   if(scalar keys %phenotype_cache) {
-
     # check cache first
     return $phenotype_cache{$description} if defined $phenotype_cache{$description};
 
     my @tmp = keys %phenotype_cache;
 
-    # lc everything
+    # create a backup of the phenotype description
     my $description_bak = $description;
-    $description = lc($description);
+    # clean description again to remove extra characters
+    $description = $self->_clean_phenotype_desc($description, 1);
 
     # store mapped
     my %mapped;
@@ -1481,6 +1584,17 @@ sub _get_phenotype_id {
       }
     }
 
+    # compare phenotype descriptions using the clean_phenotype_cache
+    my @parse_desc = parse_line('\s+', 0, $description);
+    my @parse_desc_sorted = sort @parse_desc;
+    my $parse_desc_sorted_join = join(',', @parse_desc_sorted);
+    if($clean_phenotype_cache{$parse_desc_sorted_join}) {
+      my @phenos = @{$clean_phenotype_cache{$parse_desc_sorted_join}};
+      # use the first match
+      $phenotype_cache{$description_bak} = $phenos[0]->{id};
+      return $phenotype_cache{$description_bak};
+    }
+
     # restore from backup before inserting
     $description = $description_bak;
   }
@@ -1536,7 +1650,7 @@ sub _get_study_id {
 
     if (defined $phenotype->{"study"}) {
       if (length($phenotype->{"study"}) > 255) {
-        $self->print_errFH( "WARNING: study external_references truncated search FROM:>".$phenotype->{"study"}. "<\n");
+        $self->print_errFH( "\nWARNING: study external_references truncated search FROM:>".$phenotype->{"study"}. "<\n");
         $phenotype->{"study"} = substr($phenotype->{"study"}, 0, 254);
         $phenotype->{"study"} = substr($phenotype->{"study"}, 0,rindex($phenotype->{"study"}, ",PMID"));
         $self->print_errFH( "WARNING: study external_references truncated search TO  :>".$phenotype->{"study"}. "<\n");
@@ -1769,5 +1883,21 @@ sub _count_results{
   }
 }
 
+# to clean empty files 
+sub clean_dir {
+  my $self = shift;
+  
+  my $workdir = $self->workdir;
+  die("ERROR: Pipeline directory needs to be defined \n") unless defined($self->workdir);
+
+  opendir my $dh, $workdir or die("ERROR: There was a problem opening the directory: $!\n");
+  while (my $file = readdir($dh)) {
+    if (-z $workdir."/".$file) {
+      unlink $workdir."/".$file or die ("ERROR: $file can not be removed: $!\n");
+    }
+  }
+  closedir $dh; 
+  
+}
 
 1;

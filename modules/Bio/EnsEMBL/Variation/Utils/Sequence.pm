@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2021] EMBL-European Bioinformatics Institute
+Copyright [2016-2026] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -498,10 +498,14 @@ sub hgvs_variant_notation {
   my $display_start = shift;
   my $display_end = shift;
   my $var_name  = shift;
+  my $lookup_order = shift;
 
   # If display_start and display_end were not specified, use ref_start and ref_end
   $display_start ||= $ref_start;
   $display_end ||= $ref_end;
+
+  # the order of lookup direction for checking dup - if 1 it means first check at 5' direction and then 3'
+  $lookup_order ||= 1;
   
   #Throw an exception if the lengths of the display interval and reference interval are different
   throw("The coordinate interval for display is of different length than for the reference allele") if (($display_end - $display_start) != ($ref_end - $ref_start));
@@ -526,7 +530,6 @@ sub hgvs_variant_notation {
     #warn "\nError in HGVS calculation for $var_name: alt allele ($alt_allele) is the same as the reference allele ($ref_allele) - potential strand or allele ordering problem - skipping\n";
     return undef ;
   }
-
   # Store the notation in a hash that will be returned
   my %notation;
   $notation{'start'} = $display_start;
@@ -566,17 +569,23 @@ sub hgvs_variant_notation {
   # If this is an insertion, we should check if the preceeding reference nucleotides match the insertion. In that case it should be annotated as a multiplication.
   if (!$ref_length) {
   
-    # Get the same number of nucleotides preceding the insertion as the length of the insertion
-    my $prev_str = substr($ref_sequence,($ref_end-$alt_length),$alt_length);
+    # lookup_direction = 1: look at 5' then 3' direction for ref string (reversed order for -1)
+    my @lookup_direction = $lookup_order == 1 ? (1, -1) : (-1, 1);
 
-    # If they match, this is a duplication
-    if ($prev_str eq $alt_allele) {
+    for my $direction (@lookup_direction) {
+      # Get the same number of nucleotides preceding the insertion as the length of the insertion
+      my $prev_str = $direction == 1 ?
+        substr($ref_sequence,$ref_end,$alt_length) :
+        substr($ref_sequence,($ref_end-$alt_length),$alt_length);
 
-      $notation{'start'} = ($display_end - $alt_length + 1);
-      $notation{'type'} = 'dup';
+      # If they match, this is a duplication
+      if ($prev_str eq $alt_allele) {
+        $notation{'end'}   = $display_start + $alt_length - 1 if $direction == 1;
+        $notation{'start'} = ($display_end - $alt_length + 1) if $direction == -1;
+        $notation{'type'}  = 'dup';
 
-      # Return the notation
-      return \%notation;
+        return \%notation;
+      }
     }
 
     # If they didn't match it's a plain insertion
@@ -605,6 +614,7 @@ sub hgvs_variant_notation {
   
   # Else, it's gotta be a delins
   $notation{'type'} = 'delins';
+  
   return \%notation;
 }
 
@@ -922,6 +932,7 @@ sub align_seqs {
   Arg[4]      : (optional) int $end
   Arg[5]      : (optional) bool $empty_to_dash
   Arg[6]      : (optional) bool $end_first
+  Arg[7]      : (optional) int $strand
   Example     : my ($new_ref, $new_alt, $new_start) = @{trim_sequences($ref, $alt, $start)}
   Description : Takes a pair of reference and alternate sequences and trims common sequence
                 from the start and then the end to give the minimal pair of alleles,
@@ -952,12 +963,13 @@ sub align_seqs {
 =cut
 
 sub trim_sequences {
-  my ($ref, $alt, $start, $end, $empty_to_dash, $end_first) = @_;
+  my ($ref, $alt, $start, $end, $empty_to_dash, $end_first, $strand) = @_;
 
   throw("Missing reference or alternate sequence") unless defined $ref && defined $alt;
 
   $start ||= 0;
   $end ||= $start + (length($ref) - 1);
+  $strand ||= 1;
 
   my $changed = 0;
 
@@ -966,7 +978,12 @@ sub trim_sequences {
     while($ref && $alt && substr($ref, -1, 1) eq substr($alt, -1, 1)) {
       $ref = substr($ref, 0, length($ref) - 1);
       $alt = substr($alt, 0, length($alt) - 1);
-      $end--;
+      if($strand == -1) {
+        $start++;
+      }
+      else {
+        $end--;
+      }
       $changed = 1;
     }
 
@@ -974,7 +991,12 @@ sub trim_sequences {
     while($ref && $alt && substr($ref, 0, 1) eq substr($alt, 0, 1)) {
       $ref = substr($ref, 1);
       $alt = substr($alt, 1);
-      $start++;
+      if($strand == -1) {
+        $end--;
+      }
+      else {
+        $start++;
+      }
       $changed = 1;
     }
   }
@@ -984,7 +1006,12 @@ sub trim_sequences {
     while($ref && $alt && substr($ref, 0, 1) eq substr($alt, 0, 1)) {
       $ref = substr($ref, 1);
       $alt = substr($alt, 1);
-      $start++;
+      if($strand == -1) {
+        $end--;
+      }
+      else {
+        $start++;
+      }
       $changed = 1;
     }
 
@@ -992,7 +1019,12 @@ sub trim_sequences {
     while($ref && $alt && substr($ref, -1, 1) eq substr($alt, -1, 1)) {
       $ref = substr($ref, 0, length($ref) - 1);
       $alt = substr($alt, 0, length($alt) - 1);
-      $end--;
+      if($strand == -1) {
+        $start++;
+      }
+      else {
+        $end--;
+      }
       $changed = 1;
     }
   }

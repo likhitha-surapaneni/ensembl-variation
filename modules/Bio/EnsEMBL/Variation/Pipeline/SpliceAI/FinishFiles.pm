@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2021] EMBL-European Bioinformatics Institute
+Copyright [2016-2026] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -46,10 +46,8 @@ sub clean_dir {
   my $split_vcf_input_dir = $self->param_required('split_vcf_input_dir');
   my $split_vcf_output_dir = $self->param_required('split_vcf_output_dir');
 
-  # Remove files
+  # Remove input files without header
   $self->run_system_command("rm -rf $split_vcf_no_header_dir");
-  $self->run_system_command("rm -rf $split_vcf_input_dir");
-  $self->run_system_command("rm -rf $split_vcf_output_dir");
 
 }
 

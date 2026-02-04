@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2021] EMBL-European Bioinformatics Institute
+Copyright [2016-2026] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -50,6 +50,30 @@ sub run {
     ## updated production db for later use
     $self->update_internal_db($new_counts);
 
+    ## Update meta table with this analysis
+    $self->update_meta();
+
+    my $species = $self->param('species');
+    my $adaptor = $self->get_adaptor($species, 'variation');
+    my $dbname = $adaptor->dbc()->dbname();
+
+    # prepare old_server_uri to which to compare against
+    my $old_server_uri = $self->param('old_server_uri');
+
+    unless ($old_server_uri) {
+      my $user    = $adaptor->dbc()->user;
+      my $port    = $adaptor->dbc()->port;
+      my $host    = $adaptor->dbc()->host;
+      my $pass    = $adaptor->dbc()->pass;
+      my $release = $self->param('ensembl_release') - 1;
+      $old_server_uri ||= sprintf("mysql://%s:%s@%s:%s/%s",
+                                $user, $pass, $host, $port, $release);
+    }
+
+    $self->param('dc_output_ids', { dbname => $dbname, old_server_uri => [ $old_server_uri ] });
+    if ($self->param('run_dc')) {
+      $self->dataflow_output_id($self->param('dc_output_ids'), 1);
+    }
 }
 
 =head2 get_new_results
@@ -57,7 +81,7 @@ sub run {
 Run all the counting SQL on the new database
 
 =cut
-sub get_new_results{
+sub get_new_results {
 
     my $self     = shift;
     my $previous = shift;  ## previous status only available if production db connection details supplied
@@ -152,7 +176,7 @@ sub get_new_results{
 Print a report in the working directory showing current and previous data
 
 =cut
-sub report_results{
+sub report_results {
 
     my $self     = shift;
     my $new      = shift;
@@ -226,7 +250,7 @@ Check internal production database for previous protein impact information
 for this species 
 
 =cut
-sub get_old_results{
+sub get_old_results {
 
     my  $self = shift;
 
@@ -257,7 +281,7 @@ sub get_old_results{
 Update internal production database with new statuses   
 
 =cut
-sub update_internal_db{
+sub update_internal_db {
 
     my $self             = shift;
     my $new_counts       = shift;
@@ -318,7 +342,7 @@ sub update_internal_db{
  It returns either the total number of rows in the table or 
  a hash of attribute => row count depending on input.
 =cut
-sub count_results{
+sub count_results {
 
     my $dbc = shift;
     my $st  = shift;
@@ -340,7 +364,7 @@ sub count_results{
 }
 
 
-sub format_percent{
+sub format_percent {
 
     my $part  = shift;
     my $whole = shift;
@@ -350,6 +374,20 @@ sub format_percent{
     return  substr((100 * $part / $whole ),0,5) ;
 }
 
+sub update_meta {
+
+  my $self = shift;
+
+  my $var_dba  = $self->get_species_adaptor('variation');
+
+  my $var_dbh = $var_dba->dbc->db_handle;
+
+  my $update_meta_sth = $var_dbh->prepare(qq[ insert ignore into meta
+                                              ( meta_key, meta_value) values (?,?)
+                                            ]);
+
+  $update_meta_sth->execute('TranscriptEffect_run_date', $self->run_date() );
+
+}
 
 1;
-

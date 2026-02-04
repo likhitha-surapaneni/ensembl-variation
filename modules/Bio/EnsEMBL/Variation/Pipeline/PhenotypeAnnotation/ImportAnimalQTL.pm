@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2021] EMBL-European Bioinformatics Institute
+Copyright [2016-2026] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -59,36 +59,40 @@ use base ('Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::BasePhenotype
 
 my %source_info;
 
-# AnimalQTLdb URL set up for Ensembl: https://www.animalgenome.org/QTLdb/export/ENS83H19HZS/
-#my $animalqtl_url = 'https://www.animalgenome.org/cgi-bin/QTLdb/index';
 my $animalqtl_baseURL='https://www.animalgenome.org/QTLdb/export/ENS83H19HZS/';
 
 my %animalQTL_species_url = (
-  gallus_gallus => $animalqtl_baseURL.'QTL_GG_5.0.gff.txt.gz', #Gallus gallus
-  sus_scrofa => $animalqtl_baseURL.'QTL_SS_11.1.gff.txt.gz', #Sus scrofa
-  ovis_aries => $animalqtl_baseURL.'QTL_OAR_4.0.gff.txt.gz',  # Ovis aries
-  bos_taurus => $animalqtl_baseURL.'QTL_ARS_UCD1.gff.txt.gz', #Bos taurus
-  equus_caballus => $animalqtl_baseURL.'QTL_EquCab2.0.gff.txt.gz', #Equus caballus
-  ovis_aries_rambouillet => "",
+  gallus_gallus => $animalqtl_baseURL.'QTLdb_chicken_GRCg7b.gff.gz', #Gallus gallus, chicken
+  gallus_gallus_gca000002315v5 => $animalqtl_baseURL.'QTLdb_chicken_GRCg6a.gff.gz', #Gallus gallus, chicken
+  sus_scrofa => $animalqtl_baseURL.'QTLdb_pig_SS11.1.gff.gz', #Sus scrofa, pig
+  ovis_aries => $animalqtl_baseURL.'QTLdb_sheep_OAR_rambo2.gff.gz',  # Ovis aries, sheep
+  bos_taurus => $animalqtl_baseURL.'QTLdb_cattle_ARS_UCD2.gff.gz', #Bos taurus, cow
+  equus_caballus => $animalqtl_baseURL.'QTLdb_horse_EC3.gff.gz', #Equus caballus, horse 
+  ovis_aries_texel => $animalqtl_baseURL.'QTLdb_sheep_OAR3.1.gff.gz', #Ovis aries rambo
+  capra_hircus => $animalqtl_baseURL.'QTLdb_goatCHIR_ARS1.gff.gz', #capra hircus, goat
 );
 
 my %animalQTL_species_fileNames = (
-  gallus_gallus => 'QTL_gallus_gallus_gbp_6.0.gff3.gz', #Gallus gallus, remapped file
-  sus_scrofa => 'QTL_sus_scrofa_gbp_11.1.gff3.gz', #Sus scrofa
-  ovis_aries => 'QTL_ovis_aries_gbp_3.1.gff3.gz',  # Ovis aries, remapped file
-  bos_taurus => 'QTL_bos_taurus_gbp_1.2.gff3.gz', #Bos taurus
-  equus_caballus => 'QTL_equus_caballus_gbp_3.0.gff3.gz', #Equus caballus, remapped file
-  ovis_aries_rambouillet => 'QTL_ovis_aries_rambouillet_gbp_1.0.gff3.gz', # remapped from ovis aries data
+  gallus_gallus => 'QTL_gallus_gallus_GRCg7b.gff3.gz',
+  gallus_gallus_gca000002315v5 => 'QTL_gallus_gallus_GRCg6a.gff3.gz',
+  sus_scrofa => 'QTL_sus_scrofa_gbp_11.1.gff3.gz',
+  ovis_aries => 'QTL_ovis_aries_rambouillet_OAR_rambo2.gff3.gz',
+  bos_taurus => 'QTL_bos_taurus_ARS_UCD2.gff3.gz',
+  equus_caballus => 'QTL_equus_caballus_EC3.gff3.gz',
+  ovis_aries_texel => 'QTL_ovis_aries_OAR3.1.gff3.gz',
+  capra_hircus => 'QTL_capra_hircus_CHIR_ARS1.gff3.gz',
 );
 
 # use '0' if the data is not the same assembly and import should be skipped
 my %animalQTL_species_ok = (
-  gallus_gallus => 0, #Gallus gallus, remapped data, not same Ensembl assembly as AnimalQTL
-  sus_scrofa => 1, #Sus scrofa
-  ovis_aries => 0,  #Ovis aries: remapped data, not same Ensembl assembly as AnimalQTL
-  bos_taurus => 1, #Bos taurus
-  equus_caballus => 0, #Equus caballus: remapped data, not same Ensembl assembly as AnimalQTL
-  ovis_aries_rambouillet => 0, #remapped data from Ovis aries (ovis_aries_variation)
+  gallus_gallus => 1,
+  gallus_gallus_gca000002315v5 => 1,
+  sus_scrofa => 1,
+  ovis_aries => 1,
+  bos_taurus => 1,
+  equus_caballus => 1,
+  ovis_aries_texel => 1,
+  capra_hircus => 1
 );
 
 
@@ -138,7 +142,8 @@ sub fetch_input {
   print $logFH "AnimalQTL import expects input folder with gff3 files: example format QTL_gallus_gallus.*.gff3  \n" if ($self->debug);
   print $logFH "using input folder: $animalqtl_inputDir for species: $species \n" if ($self->debug);
 
-  my $inputFile = $animalqtl_inputDir."/".$animalQTL_species_fileNames{$species};
+  my $inputFile = $animalQTL_species_fileNames{$species};
+  my $inputFilePath = $animalqtl_inputDir."/".$animalQTL_species_fileNames{$species};
   my $url=$animalQTL_species_url{$species};
 
   # if the folder does not exist, try to fetch from ulr
@@ -147,28 +152,25 @@ sub fetch_input {
     make_path($animalqtl_inputDir, {error => \$err});
     die "make_path failed: ".Dumper($err) if $err && @$err;
 
-    my $fetch_cmd = "wget --content-disposition --no-check-certificate -O $inputFile \"$url\"";
-    my $return_value = $self->run_cmd($fetch_cmd)
+    my $fetch_cmd = "wget --content-disposition --no-check-certificate -O $inputFilePath \"$url\"";
+    $self->run_cmd($fetch_cmd)
       unless -e $animalqtl_inputDir."/".$animalQTL_species_fileNames{$species};
-    die ("File fetch failed code: $return_value!\n") unless defined($return_value) && $return_value == 0;
   } else {
     opendir(INDIR, $animalqtl_inputDir);
     my @files = readdir(INDIR);
     closedir(INDIR);
     my $ok = 0;
     foreach my $file (@files){
-      if ($file =~/^QTL_$species.*gff3$/ || $file =~/^QTL_$species.*gff3.gz$/){
-        $inputFile = $file;
+      if ($file eq $inputFile){
         $ok = 1;
         last;
       }
     }
     # if directory exists and file not found try to fetch the file
     if (!$ok) {
-      my $fetch_cmd = "wget --content-disposition --no-check-certificate -O $inputFile \"$url\"";
-      my $return_value = $self->run_cmd($fetch_cmd)
+      my $fetch_cmd = "wget --content-disposition --no-check-certificate -O $inputFilePath \"$url\"";
+      $self->run_cmd($fetch_cmd)
         unless -e $animalqtl_inputDir."/".$animalQTL_species_fileNames{$species};
-      die ("File fetch failed code: $return_value!\n") unless defined($return_value) && $return_value == 0;
       $ok = 1;
     }
     print $errFH "ERROR: Animal_QTLdb file not found for $species in inputDir ($animalqtl_inputDir)!\n" unless $ok;
@@ -183,12 +185,12 @@ sub fetch_input {
   $self->param('species_assembly', $gc->get_version);  #'GRCg6a' for gallus_gallus
   print $logFH 'INFO: Found core species_assembly:'. $self->param('species_assembly'). "\n" if ($self->debug);
 
-  $source_info{source_version} = strftime("%Y%m%d", localtime(stat($animalqtl_inputDir."/".$inputFile)->mtime));
-  print $logFH "Found inputDir file: $inputFile \n";
+  $source_info{source_version} = strftime("%Y%m%d", localtime(stat($inputFilePath)->mtime));
+  print $logFH "Found inputDir file: $inputFilePath \n";
   if ( -e $workdir."/".$inputFile) {
     print $logFH "Found file (".$workdir."/".$inputFile."), will skip new copy of inputData\n";
   } else {
-    my $cp_cmd = "cp -p $animalqtl_inputDir/$inputFile $workdir/$inputFile";
+    my $cp_cmd = "cp -p $inputFilePath $workdir/$inputFile";
     my $return_value = $self->run_cmd($cp_cmd);
     die ("File copy failed code: $return_value!\n") unless defined($return_value) && $return_value == 0;
   }
@@ -222,6 +224,8 @@ sub run {
                                species => $self->required_param('species'),
                                run_type => $self->required_param('run_type'),
                              });
+
+  $self->clean_dir;
 }
 
 sub write_output {
@@ -363,7 +367,7 @@ sub parse_input_file {
     }
 
     # add additional fields if found
-    $phenotype->{'study'} = $self->get_pubmed_prefix().$extra->{'PUBMED_ID'} if defined($extra->{'PUBMED_ID'} && $extra->{'PUBMED_ID'} =~ /^\d+$/);
+    $phenotype->{'study'} = $self->get_pubmed_prefix().$extra->{'PUBMED_ID'} if (defined($extra->{'PUBMED_ID'} ) && $extra->{'PUBMED_ID'} =~ /^\d+$/);
     $phenotype->{'p_value'} = $extra->{'P-value'} if defined($extra->{'P-value'});
     $phenotype->{'f_stat'} = $extra->{'F-stat'} if defined($extra->{'F-stat'});
     $phenotype->{'lod_score'} = $extra->{'LOD-score'} if defined($extra->{'LOD-score'});

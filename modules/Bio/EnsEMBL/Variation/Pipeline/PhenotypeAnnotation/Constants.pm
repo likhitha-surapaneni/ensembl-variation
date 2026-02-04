@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2021] EMBL-European Bioinformatics Institute
+Copyright [2016-2026] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -48,8 +48,9 @@ our @EXPORT_OK = qw(
             EGA
             ORPHANET
             MIMMORBID
-            DDG2P
+            G2P
             CGC
+            GENCC
             IMPC
             MGI
             MOUSE
@@ -57,7 +58,7 @@ our @EXPORT_OK = qw(
             HUMAN_VAR
             HUMAN_GENE
             ANIMALSET
-	    WORMBASE
+	        WORMBASE
             GROUP_RUN_TYPES
             SOURCES_IN_RUN_TYPES
             NONE
@@ -75,8 +76,9 @@ use constant {
   EGA       => 'EGA',
   ORPHANET  => 'Orphanet',
   MIMMORBID => 'MIMmorbid',
-  DDG2P     => 'DDG2P',
+  G2P     =>   'G2P',
   CGC       => 'CGC',
+  GENCC     => 'GenCC',
   HUMAN     => 'HUMAN',
   HUMAN_VAR => 'HUMAN_VAR', #perform all variants only imports
   HUMAN_GENE => 'HUMAN_GENE', #perform all gene phenotype only imports
@@ -94,10 +96,10 @@ use constant GROUP_RUN_TYPES => (ANIMALSET => ['OMIA','AnimalQTL'],
                                 MOUSE     => ['IMPC', 'MGI'],
                                 HUMAN     => ['GWAS', 'EGA',
                                               'Orphanet', 'MIMmorbid',
-                                              'DDG2P', 'CGC'],
+                                              'G2P', 'CGC'],
                                 HUMAN_VAR => ['GWAS', 'EGA'],
                                 HUMAN_GENE => ['Orphanet', 'MIMmorbid',
-                                              'DDG2P', 'CGC'],
+                                              'G2P', 'CGC', 'GenCC'],
                                         );
 
 use constant SOURCES_IN_RUN_TYPES => ( OMIA      => 'ANIMALSET',
@@ -109,26 +111,27 @@ use constant SOURCES_IN_RUN_TYPES => ( OMIA      => 'ANIMALSET',
                                        EGA       => 'HUMAN',
                                        ORPHANET  => 'HUMAN',
                                        MIMMORBID => 'HUMAN',
-                                       DDG2P     => 'HUMAN',
+                                       G2P     => 'HUMAN',
                                        CGC       => 'HUMAN',
+                                       GenCC     => 'HUMAN',
                                       );
 
 use constant SPECIES => ( 'RGD'       => ['rattus_norvegicus'],
                           'ZFIN'      => ['danio_rerio'],
 
-                          'ANIMALQTL' => ['bos_taurus', 'gallus_gallus', 'equus_caballus',
-                                          'sus_scrofa', 'ovis_aries', 'ovis_aries_rambouillet'],
-                          'OMIA'      => ['felis_catus','gallus_gallus','capra_hircus',
-                                          'bos_taurus','canis_lupus_familiaris','equus_caballus','canis_lupus_familiarisboxer',
-                                          'macaca_mulatta','sus_scrofa','ovis_aries', 'ovis_aries_rambouillet',
-                                          'meleagris_gallopavo', 'pan_troglodytes'],
+                          'ANIMALQTL' => ['bos_taurus', 'gallus_gallus', 'gallus_gallus_gca000002315v5', 'equus_caballus',
+                                          'sus_scrofa', 'ovis_aries', 'ovis_aries_texel', 'capra_hircus'],
+                          'OMIA'      => ['felis_catus','felis_catus_abyssinian','gallus_gallus','gallus_gallus_gca000002315v5',
+                                          'capra_hircus','bos_taurus','canis_lupus_familiaris','equus_caballus','canis_lupus_familiarisboxer',
+                                          'sus_scrofa','ovis_aries', 'ovis_aries_texel'],
 
                           'GWAS'      => ['homo_sapiens'],
                           'EGA'       => ['homo_sapiens'],
                           'ORPHANET'  => ['homo_sapiens'],
                           'MIMMORBID' => ['homo_sapiens'],
-                          'DDG2P'     => ['homo_sapiens'],
+                          'G2P'       => ['homo_sapiens'],
                           'CGC'       => ['homo_sapiens'],
+                          'GENCC'     => ['homo_sapiens'],
                           'HUMAN'     => ['homo_sapiens'],
                           'HUMAN_VAR' => ['homo_sapiens'],
                           'HUMAN_GENE'=> ['homo_sapiens'],
@@ -137,11 +140,11 @@ use constant SPECIES => ( 'RGD'       => ['rattus_norvegicus'],
                           'IMPC'      => ['mus_musculus'],
                           'MGI'       => ['mus_musculus'],
 
-			  'WORMBASE'  => [ 'caenorhabditis_elegans_prjna13758' ],
+			  'WORMBASE'  => [ 'caenorhabditis_elegans_prjna13758', 'schistosoma_mansoni_prjea36577' ],
 
-                          'ontology'  => ['homo_sapiens', 'gallus_gallus',
+                          'ontology'  => ['homo_sapiens', 'gallus_gallus', 'gallus_gallus_gca000002315v5',
                                           'sus_scrofa', 'bos_taurus',
-                                          'equus_caballus', 'ovis_aries', 'ovis_aries_rambouillet',
+                                          'equus_caballus', 'ovis_aries', 'ovis_aries_texel',
                                           'capra_hircus', 'canis_lupus_familiaris','canis_lupus_familiarisboxer']
     );
 
